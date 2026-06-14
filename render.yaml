@@ -1,0 +1,38 @@
+# =====================================================================
+#  Render Blueprint — MediCore frontend
+#  Deploys the Vite + React SPA as a static site on Render.
+#  Docs: https://render.com/docs/blueprint-spec
+#
+#  HOW TO USE
+#  1. Push this repo to GitHub/GitLab.
+#  2. Render Dashboard -> New -> Blueprint -> pick the repo.
+#  3. Render reads this file and creates the static site for you.
+#  4. Fill in the two VITE_ env vars in the dashboard (or below).
+#
+#  Your backend is Supabase (already hosted separately). This is just
+#  the static frontend that talks to Supabase over HTTPS.
+# =====================================================================
+services:
+  - type: web
+    name: medicore
+    runtime: static
+    # Build the Vite app -> outputs dist/
+    buildCommand: npm ci && npm run build
+    # Single output folder
+    staticPublishPath: ./dist
+    # Vite reads these AT BUILD TIME (import.meta.env.VITE_*).
+    # Set them in Render's dashboard (Environment tab) OR here:
+    envVars:
+      - key: VITE_SUPABASE_URL
+        sync: false
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false
+    # Public _redirects file handles SPA routing (/* -> index.html)
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: no-cache
+    # Auto-deploy when you push to main
+    autoDeploy: true
+    # Optional: custom domain + health check
+    healthCheckPath: /index.html
