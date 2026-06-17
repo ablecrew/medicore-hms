@@ -62,7 +62,7 @@ export default function AppRoutes() {
         <Route
           path="/addmissions"
           element={
-            <ProtectedRoute allowedRoles={["admin", "reception", "nurse", ]}>
+            <ProtectedRoute allowedRoles={["admin", "reception", "nurse", "doctor"]}>
               <Addmissions />
             </ProtectedRoute>
           }
