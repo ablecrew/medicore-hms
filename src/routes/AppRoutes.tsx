@@ -4,7 +4,6 @@ import ProtectedRoute from "./ProtectedRoutes";
 import AppLayout from "../layouts/AppLayout";
 
 import Dashboard from "../pages/Dashboard";
-import Doctors from "../pages/Staff";
 import Patients from "../pages/Patients";
 import Billing from "../pages/Billing";
 import Lab from "../pages/Lab";
@@ -14,6 +13,9 @@ import Login from "../pages/auth/Login";
 import StaffManagement from "../pages/staff/StaffManagement";
 import Landing from "../pages/Landing";
 import Consultations from "@/pages/Consultations";
+import Addmissions from "../pages/Addmissions";
+import Notifications from "@/pages/Notifications";
+import Reports from "@/pages/Reports";
 
 const appRoles = ["admin", "doctor", "lab", "pharmacy", "reception", "nurse"];
 
@@ -58,10 +60,10 @@ export default function AppRoutes() {
         />
 
         <Route
-          path="/doctors"
+          path="/addmissions"
           element={
-            <ProtectedRoute allowedRoles={["admin", "doctor"]}>
-              <Doctors />
+            <ProtectedRoute allowedRoles={["admin", "reception", "nurse", ]}>
+              <Addmissions />
             </ProtectedRoute>
           }
         />
@@ -87,7 +89,7 @@ export default function AppRoutes() {
         <Route
           path="/lab"
           element={
-            <ProtectedRoute allowedRoles={["admin", "lab"]}>
+            <ProtectedRoute allowedRoles={["admin", "lab", "doctor"]}>
               <Lab />
             </ProtectedRoute>
           }
@@ -112,13 +114,33 @@ export default function AppRoutes() {
         />
 
         <Route
-          path="/conultations"
+          path="/consultations"
           element={
-            <ProtectedRoute allowedRoles={["admin", "reception"]}>
+            <ProtectedRoute allowedRoles={["admin", "reception", "nurse", "doctor"]}>
               <Consultations />
             </ProtectedRoute>
           }
         />
+
+        {/* TASKS — all roles */}
+      <Route
+        path="/notifications"
+        element={
+          <ProtectedRoute allowedRoles={["admin", "doctor", "nurse", "lab", "pharmacy", "reception"]}>
+            <Notifications />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* REPORTS — admin */}
+      <Route
+        path="/reports"
+        element={
+          <ProtectedRoute allowedRoles={["admin"]}>
+            <Reports />
+          </ProtectedRoute>
+        }
+      />
       </Route>
 
       {/* FALLBACK */}

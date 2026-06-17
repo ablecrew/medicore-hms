@@ -301,7 +301,7 @@ export default function Landing() {
                 to="/login"
                 className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#1E88E5] to-[#64B5F6] px-7 py-4 text-base font-semibold text-white shadow-xl shadow-[#1E88E5]/40 transition hover:scale-[1.03]"
               >
-                Access Patient Portal <ArrowRight className="h-5 w-5" />
+                Access Portal <ArrowRight className="h-5 w-5" />
               </Link>
               <a
                 href="#features"

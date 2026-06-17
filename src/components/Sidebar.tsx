@@ -11,10 +11,16 @@ import {
   LogOut,
   X,
   type LucideIcon,
+  Bell,
+  BellIcon,
+  BarChart3,
+  UserPlus,
+  UserRoundCog,
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useAuth } from "@/context/AuthContext";
+import Lab from "@/pages/Lab";
 
 type Role = "admin" | "doctor" | "nurse" | "pharmacy" | "lab" | "reception";
 
@@ -36,12 +42,14 @@ export default function Sidebar({
     { name: "Dashboard", path: "/dashboard", icon: LayoutDashboard },
     { name: "Patients", path: "/patients", icon: Users, roles: ["admin", "doctor", "reception"] },
     { name: "Appointments", path: "/appointments", icon: Calendar, roles: ["admin", "reception"] },
-    { name: "Doctors", path: "/doctors", icon: Stethoscope, roles: ["admin", "doctor"] },
+    { name: "Addmissions", path: "/addmissions", icon: UserPlus, roles: ["admin", "doctor"] },
     { name: "Lab", path: "/lab", icon: FlaskConical, roles: ["admin", "lab"] },
     { name: "Pharmacy", path: "/pharmacy", icon: Pill, roles: ["admin", "pharmacy"] },
     { name: "Billing", path: "/billing", icon: Wallet, roles: ["admin", "reception"] },
     { name: "Consultations", path: "/consultations", icon: Stethoscope, roles: ["admin", "reception"] },
-    { name: "Staff", path: "/staff", icon: UserCog, roles: ["admin"] },
+    { name: "Staff", path: "/staff", icon: UserRoundCog, roles: ["admin"] },
+    { name: "Notifications", path: "/notifications", icon: BellIcon, roles: ["admin", "doctor", "reception", "lab", "pharmacy", "reception"] },
+    { name: "Reports", path: "/reports", icon: BarChart3, roles: ["admin"] },
   ];
 
   const allowedLinks = links.filter(
