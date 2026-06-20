@@ -7,9 +7,7 @@ export default function AppLayout() {
     <div className="flex h-screen overflow-hidden bg-slate-50">
       {/* DESKTOP SIDEBAR */}
       <aside className="hidden md:block">
-        <Sidebar isOpen={false} onClose={function (): void {
-          throw new Error("Function not implemented.");
-        } } />
+        <Sidebar />
       </aside>
 
       {/* MAIN WRAPPER */}
@@ -25,9 +23,7 @@ export default function AppLayout() {
 
       {/* MOBILE BOTTOM NAV */}
       <div className="fixed inset-x-0 bottom-0 z-50 md:hidden">
-        <Sidebar isOpen={false} onClose={function (): void {
-          throw new Error("Function not implemented.");
-        } } />
+        <Sidebar />
       </div>
     </div>
   );
