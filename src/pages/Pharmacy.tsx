@@ -1,950 +1,866 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { motion, AnimatePresence, animate } from "framer-motion";
+import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import {
-  PieChart,
-  Pie,
-  Cell,
-  BarChart,
+  AlertTriangle,
+  Archive,
+  Boxes,
+  CheckCircle2,
+  ClipboardList,
+  Download,
+  Edit3,
+  Eye,
+  FileText,
+  Loader2,
+  PackageCheck,
+  PackagePlus,
+  Pill,
+  Plus,
+  ReceiptText,
+  Search,
+  TrendingDown,
+  Truck,
+  Wallet,
+  X,
+  type LucideIcon,
+} from "lucide-react";
+import {
+  Area,
+  AreaChart,
   Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
 } from "recharts";
-import {
-  Pill,
-  Package,
-  Search,
-  X,
-  Eye,
-  PackageCheck,
-  Plus,
-  AlertTriangle,
-  CheckCircle2,
-  Clock,
-  Loader2,
-  Stethoscope,
-  Boxes,
-  Activity,
-  PackageX,
-  ArrowLeftRight,
-  DollarSign,
-  FileText,
-} from "lucide-react";
 import { supabase } from "@/lib/supabase";
-import { useAuth } from "@/context/AuthContext";
 
-/* ============================ TYPES ============================ */
+type PrescriptionStatus = "Pending" | "Dispensed";
 
-type RxStatus = "Pending" | "Dispensed";
-
-interface RxItem {
-  id: number;
-  medicine_id: string;
-  medicine_name: string;
-  dosage: string | null;
-  quantity: number;
-  unit: string;
-  unit_price: number;
-}
-
-interface Prescription {
-  id: string;
-  patient_id: string;
-  doctor_id: string;
-  status: RxStatus;
-  prescribed_at: string;
-  dispensed_at: string | null;
-  patients?: { name: string }[] | null;
-  staff?: { name: string }[] | null;
-  prescription_items?: RxItem[] | null;
-}
-
-interface Medicine {
+type MedicineRow = {
   id: string;
   name: string;
   category: string;
   stock: number;
   unit: string;
-  price: number;
+  price: number | string;
   reorder_level: number;
-}
-
-/* ============================ THEME ============================ */
-
-const RX_STATUS: Record<RxStatus, { chip: string; dot: string; hex: string }> = {
-  Pending: { chip: "bg-[#F1C40F]/15 text-[#B8860B] ring-[#F1C40F]/40", dot: "#F1C40F", hex: "#F1C40F" },
-  Dispensed: { chip: "bg-[#2ECC71]/10 text-[#1E8C4A] ring-[#2ECC71]/30", dot: "#2ECC71", hex: "#2ECC71" },
+  expiry_date: string | null;
+  batch_number?: string | null;
+  supplier?: string | null;
+  cost_price?: number | string | null;
+  is_active?: boolean | null;
+  location?: string | null;
+  last_restocked_at?: string | null;
+  created_at: string;
 };
 
-const CAT_COLORS = ["#1E88E5", "#2ECC71", "#F1C40F", "#E74C3C", "#8E44AD", "#1ABC9C", "#3498DB"];
+type PrescriptionRow = {
+  id: string;
+  patient_id: string;
+  doctor_id: string;
+  consultation_id: string | null;
+  status: PrescriptionStatus;
+  prescribed_at: string;
+  dispensed_at: string | null;
+};
 
-const inputCls =
-  "w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#1E88E5] focus:ring-2 focus:ring-[#1E88E5]/20";
+type PrescriptionItemRow = {
+  id: number;
+  prescription_id: string;
+  medicine_id: string;
+  medicine_name: string;
+  dosage: string | null;
+  quantity: number;
+  unit: string;
+  unit_price: number | string;
+};
 
-/* ============================ HELPERS ============================ */
+type PatientRow = {
+  id: string;
+  name: string;
+  age: number;
+  gender: string;
+  phone: string;
+  allergies?: string | null;
+  conditions?: string | null;
+  blood_type?: string | null;
+  status: string;
+};
 
-const fmtDate = (iso: string) =>
-  new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+type DoctorRow = {
+  id: string;
+  name: string;
+  specialization: string | null;
+  department: string | null;
+  status: string;
+  role: string;
+};
 
-const fmtDateTime = (iso: string) =>
-  new Date(iso).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+type MedicineForm = {
+  id: string;
+  name: string;
+  category: string;
+  stock: string;
+  unit: string;
+  price: string;
+  reorder_level: string;
+  expiry_date: string;
+  batch_number: string;
+  supplier: string;
+  location: string;
+  is_active: boolean;
+};
 
-const fmtKES = (n: number) => "KES " + n.toLocaleString("en-KE");
+type PrescriptionForm = {
+  id: string;
+  patient_id: string;
+  doctor_id: string;
+  medicine_id: string;
+  dosage: string;
+  quantity: string;
+  status: PrescriptionStatus;
+};
 
-const patientName = (p: Prescription) => p.patients?.[0]?.name ?? "Unknown";
-const doctorName = (p: Prescription) => p.staff?.[0]?.name ?? "—";
-const rxTotal = (p: Prescription) =>
-  (p.prescription_items ?? []).reduce((s, i) => s + i.quantity * Number(i.unit_price), 0);
+type StockForm = {
+  medicine_id: string;
+  quantity: string;
+  reason: string;
+  batch_number: string;
+  supplier: string;
+  expiry_date: string;
+  location: string;
+};
 
-/* ============================ COMPONENT ============================ */
+const schema = () => supabase.schema("medicore");
+
+const emptyMedicineForm: MedicineForm = {
+  id: "",
+  name: "",
+  category: "General",
+  stock: "0",
+  unit: "Tablets",
+  price: "0",
+  reorder_level: "10",
+  expiry_date: "",
+  batch_number: "",
+  supplier: "",
+  location: "Main Pharmacy",
+  is_active: true,
+};
+
+const emptyPrescriptionForm: PrescriptionForm = {
+  id: "",
+  patient_id: "",
+  doctor_id: "",
+  medicine_id: "",
+  dosage: "1 tab twice daily",
+  quantity: "1",
+  status: "Pending",
+};
+
+const emptyStockForm: StockForm = {
+  medicine_id: "",
+  quantity: "1",
+  reason: "Stock received",
+  batch_number: "",
+  supplier: "",
+  expiry_date: "",
+  location: "Main Pharmacy",
+};
+
+const categories = ["General", "Antimalarial", "Pain relief", "Antibiotic", "Diabetes", "Respiratory", "Emergency"];
+const units = ["Tablets", "Capsules", "Pack", "Vials", "Bottles", "Sachets", "Unit"];
+const prescriptionStatuses: Array<"All" | PrescriptionStatus> = ["All", "Pending", "Dispensed"];
+const statusColors = ["#F1C40F", "#2ECC71"];
 
 export default function Pharmacy() {
-  const { profile } = useAuth();
-
-  const [tab, setTab] = useState<"prescriptions" | "inventory">("prescriptions");
-  const [prescriptions, setPrescriptions] = useState<Prescription[]>([]);
-  const [medicines, setMedicines] = useState<Medicine[]>([]);
+  const [medicines, setMedicines] = useState<MedicineRow[]>([]);
+  const [prescriptions, setPrescriptions] = useState<PrescriptionRow[]>([]);
+  const [prescriptionItems, setPrescriptionItems] = useState<PrescriptionItemRow[]>([]);
+  const [patients, setPatients] = useState<PatientRow[]>([]);
+  const [doctors, setDoctors] = useState<DoctorRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const [search, setSearch] = useState("");
-  const [rxFilter, setRxFilter] = useState<RxStatus | "All">("All");
-  const [medFilter, setMedFilter] = useState<string>("All");
-
-  const [viewing, setViewing] = useState<Prescription | null>(null);
-  const [dispensing, setDispensing] = useState<Prescription | null>(null);
-  const [restocking, setRestocking] = useState<Medicine | null>(null);
-  const [restockQty, setRestockQty] = useState("");
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [inventorySearch, setInventorySearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"All" | PrescriptionStatus>("All");
+  const [stockFilter, setStockFilter] = useState<"All" | "Low Stock" | "In Stock" | "Expired">("All");
+  const [categoryFilter, setCategoryFilter] = useState("All");
+  const [medicineForm, setMedicineForm] = useState<MedicineForm>(emptyMedicineForm);
+  const [prescriptionForm, setPrescriptionForm] = useState<PrescriptionForm>(emptyPrescriptionForm);
+  const [stockForm, setStockForm] = useState<StockForm>(emptyStockForm);
+  const [medicineModalMode, setMedicineModalMode] = useState<"create" | "edit" | null>(null);
+  const [prescriptionModalOpen, setPrescriptionModalOpen] = useState(false);
+  const [stockModalOpen, setStockModalOpen] = useState(false);
+  const [selectedPrescription, setSelectedPrescription] = useState<PrescriptionRow | null>(null);
+  const [selectedMedicine, setSelectedMedicine] = useState<MedicineRow | null>(null);
 
-  const [toast, setToast] = useState<{ type: "success" | "error" | "info"; message: string } | null>(null);
-  const showToast = (type: "success" | "error" | "info", message: string) => {
-    setToast({ type, message });
-    setTimeout(() => setToast(null), 3200);
-  };
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
 
-  /* ---------------- LOAD ---------------- */
-  const load = useCallback(async () => {
     try {
-      const [rxRes, medRes] = await Promise.all([
-        supabase
-          .schema("medicore")
-          .from("prescriptions")
-          .select(
-            "id, patient_id, doctor_id, status, prescribed_at, dispensed_at, patients(name), staff(name), prescription_items(id, medicine_id, medicine_name, dosage, quantity, unit, unit_price)"
-          )
-          .order("prescribed_at", { ascending: false }),
-        supabase
-          .schema("medicore")
-          .from("medicines")
-          .select("id, name, category, stock, unit, price, reorder_level")
-          .order("name", { ascending: true }),
+      const [medicineResult, prescriptionResult, itemResult, patientResult, doctorResult] = await Promise.all([
+        schema().from("medicines").select("id,name,category,stock,unit,price,reorder_level,expiry_date,batch_number,supplier,cost_price,is_active,location,last_restocked_at,created_at").order("name", { ascending: true }),
+        schema().from("prescriptions").select("id,patient_id,doctor_id,consultation_id,status,prescribed_at,dispensed_at").order("prescribed_at", { ascending: false }),
+        schema().from("prescription_items").select("id,prescription_id,medicine_id,medicine_name,dosage,quantity,unit,unit_price"),
+        schema().from("patients").select("id,name,age,gender,phone,allergies,conditions,blood_type,status").order("name", { ascending: true }),
+        schema().from("staff").select("id,name,specialization,department,status,role").eq("role", "doctor").order("name", { ascending: true }),
       ]);
-      if (rxRes.error) throw rxRes.error;
-      if (medRes.error) throw medRes.error;
-      setPrescriptions((rxRes.data as Prescription[]) ?? []);
-      setMedicines((medRes.data as Medicine[]) ?? []);
-      setError(null);
+
+      if (medicineResult.error) throw medicineResult.error;
+      if (prescriptionResult.error) throw prescriptionResult.error;
+      if (itemResult.error) throw itemResult.error;
+      if (patientResult.error) throw patientResult.error;
+      if (doctorResult.error) throw doctorResult.error;
+
+      setMedicines((medicineResult.data ?? []) as MedicineRow[]);
+      setPrescriptions((prescriptionResult.data ?? []) as PrescriptionRow[]);
+      setPrescriptionItems((itemResult.data ?? []) as PrescriptionItemRow[]);
+      setPatients((patientResult.data ?? []) as PatientRow[]);
+      setDoctors((doctorResult.data ?? []) as DoctorRow[]);
     } catch (e) {
       console.error("[Pharmacy] load error:", e);
-      setError("Failed to load pharmacy data. Check schema exposure + RLS.");
+      setError("Could not load pharmacy data. Run pharmacy-full-columns.sql and check RLS.");
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  useEffect(() => { void loadData(); }, [loadData]);
 
-  /* ---------------- REALTIME ---------------- */
   useEffect(() => {
     const channel = supabase
-      .channel("medicore-pharmacy")
-      .on("postgres_changes", { event: "*", schema: "medicore", table: "prescriptions" }, () => void load())
-      .on("postgres_changes", { event: "*", schema: "medicore", table: "prescription_items" }, () => void load())
-      .on("postgres_changes", { event: "*", schema: "medicore", table: "medicines" }, () => void load())
+      .channel("medicore-pharmacy-live")
+      .on("postgres_changes", { event: "*", schema: "medicore", table: "medicines" }, () => void loadData())
+      .on("postgres_changes", { event: "*", schema: "medicore", table: "prescriptions" }, () => void loadData())
+      .on("postgres_changes", { event: "*", schema: "medicore", table: "prescription_items" }, () => void loadData())
       .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [load]);
+    return () => { supabase.removeChannel(channel); };
+  }, [loadData]);
 
-  /* ---------------- DERIVED ---------------- */
-  const filteredRx = useMemo(() => {
-    return prescriptions.filter((p) => {
-      const q = search.toLowerCase();
-      const matchesSearch =
-        !q || patientName(p).toLowerCase().includes(q) || p.id.toLowerCase().includes(q) || doctorName(p).toLowerCase().includes(q);
-      const matchesFilter = rxFilter === "All" || p.status === rxFilter;
-      return matchesSearch && matchesFilter;
+  const patientMap = useMemo(() => new Map(patients.map((p) => [p.id, p])), [patients]);
+  const doctorMap = useMemo(() => new Map(doctors.map((d) => [d.id, d])), [doctors]);
+  const medicineMap = useMemo(() => new Map(medicines.map((m) => [m.id, m])), [medicines]);
+
+  const itemsByPrescription = useMemo(() => {
+    const map = new Map<string, PrescriptionItemRow[]>();
+    prescriptionItems.forEach((item) => {
+      map.set(item.prescription_id, [...(map.get(item.prescription_id) ?? []), item]);
     });
-  }, [prescriptions, search, rxFilter]);
+    return map;
+  }, [prescriptionItems]);
 
-  const filteredMeds = useMemo(() => {
-    return medicines.filter((m) => {
-      const q = search.toLowerCase();
-      const matchesSearch = !q || m.name.toLowerCase().includes(q) || m.category.toLowerCase().includes(q) || m.id.toLowerCase().includes(q);
-      const matchesCat = medFilter === "All" || m.category === medFilter;
-      return matchesSearch && matchesCat;
-    });
-  }, [medicines, search, medFilter]);
-
-  const stats = useMemo(() => {
-    const stockValue = medicines.reduce((s, m) => s + m.stock * Number(m.price), 0);
-    return {
-      pending: prescriptions.filter((p) => p.status === "Pending").length,
-      dispensed: prescriptions.filter((p) => p.status === "Dispensed").length,
-      lowStock: medicines.filter((m) => m.stock <= m.reorder_level).length,
-      stockValue,
-    };
-  }, [prescriptions, medicines]);
-
-  const rxStatusData = useMemo(
-    () =>
-      (["Pending", "Dispensed"] as RxStatus[])
-        .map((k) => ({ name: k, value: prescriptions.filter((p) => p.status === k).length, color: RX_STATUS[k].hex }))
-        .filter((d) => d.value > 0),
-    [prescriptions]
-  );
-
-  const categoryData = useMemo(() => {
-    const counts: Record<string, number> = {};
-    medicines.forEach((m) => {
-      counts[m.category] = (counts[m.category] ?? 0) + 1;
-    });
-    return Object.entries(counts).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 6);
+  const nextMedicineId = useMemo(() => {
+    const highest = medicines.reduce((max, m) => {
+      const v = Number(m.id.replace(/\D/g, ""));
+      return Number.isFinite(v) ? Math.max(max, v) : max;
+    }, 0);
+    return `MED-${String(highest + 1 || medicines.length + 1).padStart(3, "0")}`;
   }, [medicines]);
 
-  const categories = useMemo(() => Array.from(new Set(medicines.map((m) => m.category))).sort(), [medicines]);
+  const nextPrescriptionId = useMemo(() => {
+    const highest = prescriptions.reduce((max, p) => {
+      const v = Number(p.id.replace(/\D/g, ""));
+      return Number.isFinite(v) ? Math.max(max, v) : max;
+    }, 0);
+    return `RX-${String(highest + 1 || prescriptions.length + 1).padStart(4, "0")}`;
+  }, [prescriptions]);
 
-  /* ---------------- ACTIONS ---------------- */
-  const dispense = async () => {
-    if (!dispensing) return;
-    setSaving(true);
+  const filteredPrescriptions = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
+    return prescriptions.filter((p) => {
+      const patient = patientMap.get(p.patient_id);
+      const doctor = doctorMap.get(p.doctor_id);
+      const items = itemsByPrescription.get(p.id) ?? [];
+      const searchable = [p.id, patient?.name ?? "", patient?.phone ?? "", doctor?.name ?? "", ...items.map((i) => i.medicine_name)].join(" ").toLowerCase();
+      return (!q || searchable.includes(q)) && (statusFilter === "All" || p.status === statusFilter);
+    });
+  }, [doctorMap, itemsByPrescription, patientMap, prescriptions, searchTerm, statusFilter]);
+
+  const filteredMedicines = useMemo(() => {
+    const q = inventorySearch.trim().toLowerCase();
+    const today = new Date().toLocaleDateString("en-CA");
+    return medicines.filter((m) => {
+      const matchesSearch = !q || [m.id, m.name, m.category, m.unit].join(" ").toLowerCase().includes(q);
+      const matchesCategory = categoryFilter === "All" || m.category === categoryFilter;
+      const isLow = m.stock <= m.reorder_level;
+      const isExpired = m.expiry_date ? m.expiry_date < today : false;
+      const matchesStock = stockFilter === "All" || (stockFilter === "Low Stock" && isLow) || (stockFilter === "In Stock" && !isLow && !isExpired) || (stockFilter === "Expired" && isExpired);
+      return matchesSearch && matchesCategory && matchesStock;
+    });
+  }, [categoryFilter, inventorySearch, medicines, stockFilter]);
+
+  const kpis = useMemo(() => {
+    const today = new Date().toLocaleDateString("en-CA");
+    return {
+      medicines: medicines.length,
+      pending: prescriptions.filter((p) => p.status === "Pending").length,
+      dispensedToday: prescriptions.filter((p) => p.dispensed_at && new Date(p.dispensed_at).toLocaleDateString("en-CA") === today).length,
+      lowStock: medicines.filter((m) => m.stock <= m.reorder_level).length,
+      stockValue: medicines.reduce((s, m) => s + m.stock * Number(m.price), 0),
+    };
+  }, [medicines, prescriptions]);
+
+  const statusData = useMemo(() => [
+    { label: "Pending", value: prescriptions.filter((p) => p.status === "Pending").length },
+    { label: "Dispensed", value: prescriptions.filter((p) => p.status === "Dispensed").length },
+  ], [prescriptions]);
+
+  const categoryData = useMemo(() => {
+    const counts = new Map<string, number>();
+    medicines.forEach((m) => counts.set(m.category, (counts.get(m.category) ?? 0) + m.stock));
+    return Array.from(counts.entries()).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value).slice(0, 7);
+  }, [medicines]);
+
+  const weeklyDispenseData = useMemo(() => {
+    return Array.from({ length: 7 }, (_, index) => {
+      const date = new Date();
+      date.setDate(date.getDate() - (6 - index));
+      const iso = date.toLocaleDateString("en-CA");
+      return { label: date.toLocaleDateString("en-US", { weekday: "short" }), value: prescriptions.filter((p) => p.dispensed_at && new Date(p.dispensed_at).toLocaleDateString("en-CA") === iso).length };
+    });
+  }, [prescriptions]);
+
+  const selectedItems = selectedPrescription ? itemsByPrescription.get(selectedPrescription.id) ?? [] : [];
+
+  /* ---------- MODALS ---------- */
+  const openCreateMedicineModal = () => { setMedicineForm({ ...emptyMedicineForm, id: nextMedicineId }); setMedicineModalMode("create"); };
+  const openEditMedicineModal = (m: MedicineRow) => {
+    setMedicineForm({
+      id: m.id, name: m.name, category: m.category, stock: String(m.stock), unit: m.unit, price: String(m.price),
+      reorder_level: String(m.reorder_level), expiry_date: m.expiry_date ?? "", batch_number: m.batch_number ?? "",
+      supplier: m.supplier ?? "", location: m.location ?? "Main Pharmacy", is_active: m.is_active ?? true,
+    });
+    setMedicineModalMode("edit");
+  };
+  const openStockModal = (m?: MedicineRow) => { setStockForm({ ...emptyStockForm, medicine_id: m?.id ?? medicines[0]?.id ?? "" }); setStockModalOpen(true); };
+  const openPrescriptionModal = () => {
+    setPrescriptionForm({ ...emptyPrescriptionForm, id: nextPrescriptionId, patient_id: patients[0]?.id ?? "", doctor_id: doctors[0]?.id ?? "", medicine_id: medicines[0]?.id ?? "" });
+    setPrescriptionModalOpen(true);
+  };
+
+  /* ---------- SUBMIT HANDLERS ---------- */
+  const handleMedicineSubmit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setSaving(true); setError(null);
+    const payload = {
+      id: medicineForm.id.trim(), name: medicineForm.name.trim(), category: medicineForm.category.trim(),
+      stock: Number(medicineForm.stock), unit: medicineForm.unit.trim(), price: Number(medicineForm.price),
+      reorder_level: Number(medicineForm.reorder_level), expiry_date: medicineForm.expiry_date || null,
+      batch_number: medicineForm.batch_number.trim() || null, supplier: medicineForm.supplier.trim() || null,
+      location: medicineForm.location.trim() || null, is_active: medicineForm.is_active,
+      ...(medicineModalMode === "create" ? { last_restocked_at: new Date().toISOString() } : {}),
+    };
+    const { error: err } = medicineModalMode === "create"
+      ? await schema().from("medicines").insert(payload)
+      : await schema().from("medicines").update(payload).eq("id", medicineForm.id);
+    if (err) { setError(err.message); setSaving(false); return; }
+    setNotice(medicineModalMode === "create" ? "Medicine added to inventory." : "Medicine updated.");
+    setMedicineModalMode(null); setSaving(false); await loadData();
+  };
+
+  const handlePrescriptionSubmit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setSaving(true); setError(null);
+    const med = medicineMap.get(prescriptionForm.medicine_id);
+    if (!med) { setError("Select a valid medicine."); setSaving(false); return; }
+    const rxId = prescriptionForm.id.trim();
+    const { error: rxErr } = await schema().from("prescriptions").insert({
+      id: rxId, patient_id: prescriptionForm.patient_id, doctor_id: prescriptionForm.doctor_id,
+      consultation_id: null, status: prescriptionForm.status,
+    });
+    if (rxErr) { setError(rxErr.message); setSaving(false); return; }
+    const { error: itemErr } = await schema().from("prescription_items").insert({
+      prescription_id: rxId, medicine_id: med.id, medicine_name: med.name,
+      dosage: prescriptionForm.dosage.trim() || null, quantity: Number(prescriptionForm.quantity),
+      unit: med.unit, unit_price: Number(med.price),
+    });
+    if (itemErr) { setError(itemErr.message); setSaving(false); return; }
+    setNotice("Prescription added to pharmacy queue.");
+    setPrescriptionModalOpen(false); setSaving(false); await loadData();
+  };
+
+  const receiveStock = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setSaving(true); setError(null);
+    const med = medicineMap.get(stockForm.medicine_id);
+    if (!med) { setError("Select a valid medicine."); setSaving(false); return; }
+    const nextStock = med.stock + Number(stockForm.quantity);
+    const { error: err } = await schema().from("medicines").update({
+      stock: nextStock,
+      batch_number: stockForm.batch_number.trim() || med.batch_number || null,
+      supplier: stockForm.supplier.trim() || med.supplier || null,
+      expiry_date: stockForm.expiry_date || med.expiry_date || null,
+      location: stockForm.location.trim() || med.location || "Main Pharmacy",
+      last_restocked_at: new Date().toISOString(),
+    }).eq("id", med.id);
+    if (err) { setError(err.message); setSaving(false); return; }
+    // Try to log stock movement (non-blocking if table doesn't exist)
+    try { await schema().from("stock_movements").insert({ medicine_id: med.id, movement_type: "Received", quantity: Number(stockForm.quantity), reason: stockForm.reason }); } catch {}
+    setNotice(`${med.name} stock updated to ${nextStock} ${med.unit}.`);
+    setStockModalOpen(false); setSaving(false); await loadData();
+  };
+
+  const dispensePrescription = async (p: PrescriptionRow) => {
+    const items = itemsByPrescription.get(p.id) ?? [];
+    const missing = items.find((i) => { const m = medicineMap.get(i.medicine_id); return !m || m.stock < i.quantity; });
+    if (missing) { setError(`${missing.medicine_name} does not have enough stock.`); return; }
+    setSaving(true); setError(null);
+    for (const item of items) {
+      const med = medicineMap.get(item.medicine_id);
+      if (!med) continue;
+      const { error: mErr } = await schema().from("medicines").update({ stock: Math.max(0, med.stock - item.quantity) }).eq("id", med.id);
+      if (mErr) { setError(mErr.message); setSaving(false); return; }
+      try { await schema().from("stock_movements").insert({ medicine_id: med.id, movement_type: "Dispensed", quantity: item.quantity * -1, reason: `Dispensed ${item.medicine_name}` }); } catch {}
+    }
+    const { error: pErr } = await schema().from("prescriptions").update({ status: "Dispensed", dispensed_at: new Date().toISOString() }).eq("id", p.id);
+    if (pErr) { setError(pErr.message); setSaving(false); return; }
+    // Auto-bill
     try {
-      const { error: rxErr } = await supabase
-        .schema("medicore")
-        .from("prescriptions")
-        .update({ status: "Dispensed", dispensed_at: new Date().toISOString() })
-        .eq("id", dispensing.id);
-      if (rxErr) throw rxErr;
-
-      const items = dispensing.prescription_items ?? [];
-      await Promise.all(
-        items.map(async (it) => {
-          const med = medicines.find((m) => m.id === it.medicine_id);
-          if (!med) return;
-          const newStock = Math.max(0, med.stock - it.quantity);
-          const { error: mErr } = await supabase.schema("medicore").from("medicines").update({ stock: newStock }).eq("id", med.id);
-          if (mErr) console.error("stock update failed for", med.id, mErr);
-        })
-      );
-
-      showToast("success", `${dispensing.id} dispensed. Stock updated automatically.`);
-      setDispensing(null);
-      await load();
-    } catch (e) {
-      console.error("[Pharmacy] dispense error:", e);
-      showToast("error", "Could not dispense prescription.");
-    } finally {
-      setSaving(false);
-    }
+      const total = items.reduce((s, i) => s + i.quantity * Number(i.unit_price), 0);
+      const invId = `INV-${Date.now()}`;
+      await schema().from("invoices").insert({ id: invId, patient_id: p.patient_id, total_amount: total, status: "Pending", payment_method: "Pharmacy" });
+      await schema().from("invoice_items").insert(items.map((i) => ({ invoice_id: invId, service: `Medicine - ${i.medicine_name}`, amount: i.quantity * Number(i.unit_price) })));
+    } catch (e) { console.error("[Pharmacy] auto-bill error:", e); }
+    setNotice("Medication dispensed. Stock updated and invoice created.");
+    setSelectedPrescription(null); setSaving(false); await loadData();
   };
 
-  const openRestock = (m: Medicine) => {
-    setRestocking(m);
-    setRestockQty("");
+  const exportInventory = () => {
+    const header = "ID,Name,Category,Stock,Unit,Price,Reorder Level,Expiry,Batch,Supplier,Location";
+    const rows = medicines.map((m) => [m.id, m.name, m.category, m.stock, m.unit, m.price, m.reorder_level, m.expiry_date ?? "", m.batch_number ?? "", m.supplier ?? "", m.location ?? ""].join(","));
+    const blob = new Blob([[header, ...rows].join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a"); link.href = url; link.download = "medicore-pharmacy-inventory.csv"; link.click();
+    URL.revokeObjectURL(url);
   };
 
-  const submitRestock = async () => {
-    if (!restocking) return;
-    const add = Number(restockQty);
-    if (!add || add <= 0) {
-      showToast("error", "Enter a valid quantity.");
-      return;
-    }
-    setSaving(true);
-    try {
-      const { error: e } = await supabase.schema("medicore").from("medicines").update({ stock: restocking.stock + add }).eq("id", restocking.id);
-      if (e) throw e;
-      showToast("success", `Restocked ${restocking.name} by +${add}.`);
-      setRestocking(null);
-      setRestockQty("");
-      await load();
-    } catch (e) {
-      console.error("[Pharmacy] restock error:", e);
-      showToast("error", "Could not restock.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  /* ---------------- UI ---------------- */
+  /* ---------- UI ---------- */
   return (
     <div className="min-h-full space-y-6 rounded-2xl bg-gradient-to-b from-white via-[#EAF4FE] to-[#F4F6F8] p-4 md:p-6">
       {/* HEADER */}
-      <motion.div
-        initial={{ opacity: 0, y: -12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
-        className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#1E88E5] via-[#2196F3] to-[#64B5F6] p-6 text-white shadow-lg shadow-[#1E88E5]/25 sm:p-8"
-      >
+      <motion.section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#1E88E5] via-[#2196F3] to-[#64B5F6] p-6 text-white shadow-lg shadow-[#1E88E5]/25 sm:p-8" initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
         <div className="pointer-events-none absolute -right-10 -top-10 h-48 w-48 rounded-full bg-white/10 blur-2xl" />
         <div className="pointer-events-none absolute -bottom-16 right-32 h-40 w-40 rounded-full bg-white/10 blur-3xl" />
         <div className="relative flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-xs font-medium backdrop-blur">
-              <Pill className="h-3.5 w-3.5" /> Pharmacy Module
-            </div>
+            <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-xs font-medium backdrop-blur"><Pill className="h-3.5 w-3.5" /> Pharmacy Information System</div>
             <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Dispensary &amp; Inventory</h1>
-            <p className="mt-1 text-sm text-blue-50/90">
-              Dispense prescriptions &amp; manage medicine stock
-              {profile?.name ? ` · ${profile.name.split(" ")[0]}` : ""}
-            </p>
+            <p className="mt-1 text-sm text-blue-50/90">Allergy screening · Batch tracking · Auto-billing</p>
           </div>
-          <div className="flex items-center gap-3 self-start rounded-2xl bg-white/10 px-5 py-4 backdrop-blur">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/20">
-              <Clock className="h-6 w-6" />
-            </div>
-            <div>
-              <p className="text-3xl font-bold leading-none">{stats.pending}</p>
-              <p className="text-xs text-blue-100">Awaiting dispense</p>
-            </div>
+          <div className="flex flex-wrap gap-3">
+            <button className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-white px-5 text-sm font-semibold text-[#1E88E5] shadow-lg transition hover:bg-blue-50" onClick={openPrescriptionModal} type="button"><Plus className="h-4 w-4" /> New Prescription</button>
+            <button className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-[#2ECC71] px-5 text-sm font-semibold text-white shadow-lg transition hover:bg-[#27AE60]" onClick={() => openStockModal()} type="button"><Truck className="h-4 w-4" /> Receive Stock</button>
           </div>
         </div>
-      </motion.div>
+      </motion.section>
 
-      {error && (
-        <div className="flex items-center gap-2 rounded-xl border border-[#E74C3C]/20 bg-[#E74C3C]/5 p-3 text-sm text-[#C0392B]">
-          <AlertTriangle className="h-4 w-4 shrink-0" /> {error}
-        </div>
-      )}
+      <AnimatePresence>
+        {(error || notice) && (
+          <motion.div className={`flex items-start gap-3 rounded-xl border p-3 text-sm font-medium ${error ? "border-[#E74C3C]/20 bg-[#E74C3C]/5 text-[#C0392B]" : "border-[#2ECC71]/20 bg-[#2ECC71]/5 text-[#1E8C4A]"}`} initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}>
+            {error ? <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> : <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />}
+            <span>{error ?? notice}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* STATS */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Pending" value={stats.pending} icon={Clock} gradient="from-[#F1C40F] to-[#F39C12]" delta="Awaiting" />
-        <StatCard label="Dispensed" value={stats.dispensed} icon={PackageCheck} gradient="from-[#2ECC71] to-[#58D68D]" delta="Completed" />
-        <StatCard label="Low Stock" value={stats.lowStock} icon={PackageX} gradient="from-[#E74C3C] to-[#EC7063]" delta="Reorder" />
-        <StatCard label="Stock Value" value={stats.stockValue} icon={DollarSign} gradient="from-[#1E88E5] to-[#64B5F6]" delta="KES" money />
-      </div>
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <MetricCard icon={Boxes} label="Medicines" value={kpis.medicines} tone="blue" />
+        <MetricCard icon={ClipboardList} label="Pending Rx" value={kpis.pending} tone="yellow" />
+        <MetricCard icon={PackageCheck} label="Dispensed Today" value={kpis.dispensedToday} tone="green" />
+        <MetricCard icon={TrendingDown} label="Low Stock" value={kpis.lowStock} tone="red" />
+        <MetricCard icon={Wallet} label="Stock Value" value={kpis.stockValue} tone="blue" money />
+      </section>
 
       {/* CHARTS */}
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.05 }}
-          className="rounded-3xl border border-slate-200/70 bg-white p-5 shadow-sm lg:col-span-2"
-        >
-          <div className="mb-4">
-            <h3 className="flex items-center gap-2 text-base font-semibold text-slate-800">
-              <Boxes className="h-4 w-4 text-[#1E88E5]" /> Inventory by Category
-            </h3>
-            <p className="text-sm text-slate-500">Medicine distribution</p>
-          </div>
-          <ResponsiveContainer width="100%" height={230}>
-            <BarChart data={categoryData} margin={{ left: -20, right: 8, top: 8 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-              <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} interval={0} angle={-12} textAnchor="end" height={50} />
-              <YAxis allowDecimals={false} tick={{ fontSize: 12, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
-              <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 13 }} cursor={{ fill: "#F4F6F8" }} />
-              <Bar dataKey="value" name="Medicines" radius={[6, 6, 0, 0]} barSize={32}>
-                {categoryData.map((_, i) => (
-                  <Cell key={i} fill={CAT_COLORS[i % CAT_COLORS.length]} />
-                ))}
-              </Bar>
-            </BarChart>
+      <section className="grid gap-5 lg:grid-cols-3">
+        <div className="rounded-3xl border border-white/60 bg-white/70 p-5 shadow-lg shadow-[#1E88E5]/5 backdrop-blur-md lg:col-span-2">
+          <div className="mb-4"><h3 className="flex items-center gap-2 text-base font-semibold"><PackageCheck className="h-4 w-4 text-[#1E88E5]" /><span className="bg-gradient-to-r from-[#1E88E5] to-[#2ECC71] bg-clip-text text-transparent">Weekly Dispensing</span></h3><p className="text-sm text-slate-500">Last 7 days</p></div>
+          <ResponsiveContainer height={250} width="100%">
+            <AreaChart data={weeklyDispenseData} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+              <defs><linearGradient id="dispenseArea" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#1E88E5" stopOpacity={0.35} /><stop offset="100%" stopColor="#1E88E5" stopOpacity={0} /></linearGradient></defs>
+              <CartesianGrid stroke="#f1f5f9" strokeDasharray="3 3" vertical={false} />
+              <XAxis axisLine={false} dataKey="label" tick={{ fill: "#94a3b8", fontSize: 12 }} tickLine={false} />
+              <YAxis allowDecimals={false} axisLine={false} tick={{ fill: "#94a3b8", fontSize: 12 }} tickLine={false} />
+              <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 13 }} />
+              <Area dataKey="value" fill="url(#dispenseArea)" stroke="#1E88E5" strokeWidth={2.5} type="monotone" />
+            </AreaChart>
           </ResponsiveContainer>
-        </motion.div>
-
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.12 }}
-          className="rounded-3xl border border-slate-200/70 bg-white p-5 shadow-sm"
-        >
-          <h3 className="flex items-center gap-2 text-base font-semibold text-slate-800">
-            <Activity className="h-4 w-4 text-violet-600" /> Rx Status
-          </h3>
+        </div>
+        <div className="rounded-3xl border border-white/60 bg-white/70 p-5 shadow-lg shadow-[#1E88E5]/5 backdrop-blur-md">
+          <h3 className="flex items-center gap-2 text-base font-semibold text-slate-800"><ReceiptText className="h-4 w-4 text-violet-600" /> Rx Status</h3>
           <p className="mb-2 text-sm text-slate-500">Distribution</p>
-          {rxStatusData.length ? (
+          {statusData.length ? (
             <>
               <div className="relative">
-                <ResponsiveContainer width="100%" height={160}>
+                <ResponsiveContainer height={160} width="100%">
                   <PieChart>
-                    <Pie data={rxStatusData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={46} outerRadius={70} paddingAngle={3} stroke="none">
-                      {rxStatusData.map((d) => (
-                        <Cell key={d.name} fill={d.color} />
-                      ))}
+                    <Pie data={statusData} dataKey="value" innerRadius={46} nameKey="label" outerRadius={70} paddingAngle={3} stroke="none">
+                      {statusData.map((_, i) => <Cell key={i} fill={statusColors[i % statusColors.length]} />)}
                     </Pie>
                     <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 13 }} />
                   </PieChart>
                 </ResponsiveContainer>
-                <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                  <span className="text-2xl font-bold text-slate-900">{prescriptions.length}</span>
-                  <span className="text-xs text-slate-400">total Rx</span>
-                </div>
+                <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center"><span className="text-2xl font-bold text-slate-900">{prescriptions.length}</span><span className="text-xs text-slate-400">total</span></div>
               </div>
-              <div className="mt-3 space-y-1.5">
-                {rxStatusData.map((d) => (
-                  <div key={d.name} className="flex items-center justify-between text-xs">
-                    <span className="flex items-center gap-2 text-slate-600">
-                      <span className="h-2.5 w-2.5 rounded-full" style={{ background: d.color }} />
-                      {d.name}
-                    </span>
-                    <span className="font-semibold text-slate-700">{d.value}</span>
-                  </div>
-                ))}
-              </div>
+              <div className="mt-3 space-y-1.5">{statusData.map((d, i) => (<div key={d.label} className="flex items-center justify-between text-xs"><span className="flex items-center gap-2 text-slate-600"><span className="h-2.5 w-2.5 rounded-full" style={{ background: statusColors[i] }} />{d.label}</span><span className="font-semibold text-slate-700">{d.value}</span></div>))}</div>
             </>
-          ) : (
-            <div className="flex h-40 items-center justify-center text-sm text-slate-400">No data yet</div>
-          )}
-        </motion.div>
-      </div>
+          ) : <div className="flex h-40 items-center justify-center text-sm text-slate-400">No data yet</div>}
+        </div>
+      </section>
 
-      {/* TABS + TOOLBAR */}
-      <div className="rounded-3xl border border-slate-200/70 bg-white p-4 shadow-sm">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-center gap-1 rounded-xl bg-[#F4F6F8] p-1">
-            <button
-              onClick={() => { setTab("prescriptions"); setSearch(""); }}
-              className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold transition ${
-                tab === "prescriptions" ? "bg-white text-[#1E88E5] shadow-sm" : "text-slate-500"
-              }`}
-            >
-              <FileText className="h-4 w-4" /> Prescriptions ({prescriptions.length})
-            </button>
-            <button
-              onClick={() => { setTab("inventory"); setSearch(""); }}
-              className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold transition ${
-                tab === "inventory" ? "bg-white text-[#1E88E5] shadow-sm" : "text-slate-500"
-              }`}
-            >
-              <Package className="h-4 w-4" /> Inventory ({medicines.length})
-            </button>
+      {/* CATEGORY + LOW STOCK */}
+      <section className="grid gap-5 lg:grid-cols-2">
+        <div className="rounded-3xl border border-white/60 bg-white/70 p-5 shadow-lg shadow-[#1E88E5]/5 backdrop-blur-md">
+          <div className="mb-4"><h3 className="flex items-center gap-2 text-base font-semibold"><Archive className="h-4 w-4 text-[#1E88E5]" /><span className="text-slate-800">Inventory by Category</span></h3><p className="text-sm text-slate-500">Stock quantity by class</p></div>
+          <ResponsiveContainer height={230} width="100%">
+            <BarChart data={categoryData} layout="vertical" margin={{ top: 8, right: 18, left: 18, bottom: 0 }}>
+              <CartesianGrid stroke="#f1f5f9" strokeDasharray="3 3" horizontal={false} />
+              <XAxis allowDecimals={false} axisLine={false} tick={{ fill: "#94a3b8", fontSize: 12 }} tickLine={false} type="number" />
+              <YAxis axisLine={false} dataKey="label" tick={{ fill: "#64748b", fontSize: 12 }} tickLine={false} type="category" width={120} />
+              <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 13 }} cursor={{ fill: "#F4F6F8" }} />
+              <Bar dataKey="value" fill="#1E88E5" radius={[0, 6, 6, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        <div className="rounded-3xl border border-white/60 bg-white/70 p-5 shadow-lg shadow-[#1E88E5]/5 backdrop-blur-md">
+          <h3 className="flex items-center gap-2 text-base font-semibold"><TrendingDown className="h-4 w-4 text-[#E74C3C]" /> Low Stock Watchlist</h3>
+          <p className="mb-3 text-sm text-slate-500">Medicines needing reorder</p>
+          <div className="space-y-2">
+            {medicines.filter((m) => m.stock <= m.reorder_level).slice(0, 6).map((m) => (
+              <button key={m.id} className="flex w-full items-center justify-between rounded-xl bg-[#F4F6F8] p-3 text-left transition hover:bg-blue-50" onClick={() => setSelectedMedicine(m)} type="button">
+                <div><p className="text-sm font-semibold text-slate-800">{m.name}</p><p className="text-xs text-slate-500">Reorder at {m.reorder_level} {m.unit}</p></div>
+                <p className="text-xl font-bold text-[#E74C3C]">{m.stock}</p>
+              </button>
+            ))}
+            {medicines.filter((m) => m.stock <= m.reorder_level).length === 0 && <div className="rounded-xl bg-[#F4F6F8] p-4 text-center text-sm text-slate-400">All stock levels healthy ✅</div>}
           </div>
+        </div>
+      </section>
 
+      {/* PRESCRIPTION QUEUE */}
+      <section className="rounded-3xl border border-white/60 bg-white/70 p-5 shadow-lg shadow-[#1E88E5]/5 backdrop-blur-md">
+        <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div><h2 className="text-lg font-semibold text-slate-800">Prescription Queue</h2><p className="text-sm text-slate-500">Dispense medication &amp; update stock</p></div>
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-2 rounded-xl bg-[#F4F6F8] px-3.5 py-2.5">
-              <Search className="h-4 w-4 text-slate-400" />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder={tab === "prescriptions" ? "Search patient, ID, doctor..." : "Search medicine, category..."}
-                className="w-40 bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400 sm:w-56"
-              />
-              {search && (
-                <button onClick={() => setSearch("")} className="text-slate-400 hover:text-slate-600">
-                  <X className="h-4 w-4" />
-                </button>
-              )}
+            <div className="flex items-center gap-2 rounded-xl border border-white/60 bg-white/50 px-3.5 py-2.5 backdrop-blur-md">
+              <Search className="h-4 w-4 text-[#1E88E5]" />
+              <input className="w-40 bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400 sm:w-56" onChange={(e) => setSearchTerm(e.target.value)} placeholder="Search patient, doctor..." value={searchTerm} />
             </div>
-            {tab === "prescriptions" ? (
-              <FilterPills options={["All", "Pending", "Dispensed"]} value={rxFilter} onChange={(v) => setRxFilter(v as RxStatus | "All")} />
-            ) : (
-              <select
-                value={medFilter}
-                onChange={(e) => setMedFilter(e.target.value)}
-                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 outline-none transition focus:border-[#1E88E5] focus:ring-2 focus:ring-[#1E88E5]/20"
-              >
-                <option value="All">All Categories</option>
-                {categories.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-            )}
+            <div className="flex flex-wrap gap-1 rounded-xl bg-[#F4F6F8] p-1">
+              {prescriptionStatuses.map((s) => <button key={s} onClick={() => setStatusFilter(s)} className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${statusFilter === s ? "bg-white text-[#1E88E5] shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>{s}</button>)}
+            </div>
           </div>
         </div>
-      </div>
-
-      {/* CONTENT */}
-      {loading ? (
-        <div className="flex h-64 items-center justify-center rounded-3xl border border-slate-200/70 bg-white">
-          <Loader2 className="h-8 w-8 animate-spin text-[#1E88E5]" />
-        </div>
-      ) : tab === "prescriptions" ? (
-        filteredRx.length === 0 ? (
-          <EmptyState icon={<FileText className="h-8 w-8" />} title="No prescriptions found" />
-        ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {filteredRx.map((p, i) => {
-              const meta = RX_STATUS[p.status];
+        {loading ? <div className="flex h-40 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-[#1E88E5]" /></div>
+        : filteredPrescriptions.length === 0 ? <div className="flex h-40 flex-col items-center justify-center text-center"><FileText className="mb-2 h-10 w-10 text-slate-300" /><p className="text-sm text-slate-400">No prescriptions found</p></div>
+        : <div className="space-y-3">
+            {filteredPrescriptions.map((p) => {
+              const patient = patientMap.get(p.patient_id);
+              const doctor = doctorMap.get(p.doctor_id);
+              const items = itemsByPrescription.get(p.id) ?? [];
+              const allergies = patient?.allergies;
+              const allergyWarn = allergies ? items.filter((i) => allergies.toLowerCase().includes(i.medicine_name.toLowerCase().split(" ")[0])) : [];
               return (
-                <motion.div
-                  key={p.id}
-                  initial={{ opacity: 0, y: 16 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.04 }}
-                  whileHover={{ y: -5 }}
-                  className="group relative overflow-hidden rounded-3xl border border-slate-200/70 bg-white p-5 shadow-sm transition hover:shadow-lg"
-                >
-                  <div className="absolute inset-x-0 top-0 h-1.5" style={{ background: meta.hex }} />
-                  <div className="mb-3 flex items-start justify-between">
+                <motion.div key={p.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className={`rounded-2xl border p-4 transition hover:shadow-md ${allergyWarn.length > 0 ? "border-[#E74C3C]/30 bg-[#E74C3C]/5" : "border-slate-200 bg-white"}`}>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="flex items-center gap-3">
-                      <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-[#1E88E5] to-[#64B5F6] text-white shadow-lg">
-                        <Pill className="h-6 w-6" />
-                      </div>
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-[#1E88E5] to-[#64B5F6] text-white"><Pill className="h-5 w-5" /></div>
                       <div>
-                        <h3 className="text-base font-bold text-slate-900">{patientName(p)}</h3>
-                        <p className="text-xs text-slate-400">{p.id}</p>
+                        <div className="flex items-center gap-2"><p className="text-sm font-semibold text-slate-800">{patient?.name ?? p.patient_id}</p>{allergyWarn.length > 0 && <span className="inline-flex items-center gap-1 rounded-full bg-[#E74C3C]/10 px-2 py-0.5 text-[10px] font-semibold text-[#C0392B] ring-1 ring-inset ring-[#E74C3C]/30">⚠ ALLERGY</span>}</div>
+                        <p className="text-xs text-slate-400">{p.id} · {doctor?.name ?? "—"}</p>
                       </div>
                     </div>
-                    <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${meta.chip}`}>
-                      {p.status}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-2.5 rounded-xl bg-[#F4F6F8] p-3">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-[#1E88E5]">
-                      <Stethoscope className="h-4 w-4" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-slate-800">{doctorName(p)}</p>
-                      <p className="truncate text-xs text-slate-500">{p.prescription_items?.length ?? 0} item(s) · {fmtDate(p.prescribed_at)}</p>
+                    <div className="flex items-center gap-3">
+                      <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${p.status === "Dispensed" ? "bg-[#2ECC71]/10 text-[#1E8C4A] ring-[#2ECC71]/30" : "bg-[#F1C40F]/15 text-[#B8860B] ring-[#F1C40F]/40"}`}>{p.status}</span>
+                      <button onClick={() => setSelectedPrescription(p)} className="flex items-center gap-1.5 rounded-xl bg-[#1E88E5]/10 px-4 py-2 text-xs font-semibold text-[#1E88E5] transition hover:bg-[#1E88E5]/20"><Eye className="h-3.5 w-3.5" /> View &amp; Dispense</button>
                     </div>
                   </div>
+                  {items.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{items.slice(0, 3).map((it) => <span key={it.id} className="rounded-lg border border-slate-100 bg-[#F4F6F8] px-2.5 py-1 text-xs font-medium text-slate-600">{it.medicine_name} ×{it.quantity}</span>)}{items.length > 3 && <span className="px-1 text-xs text-slate-400">+{items.length - 3} more</span>}</div>}
+                </motion.div>
+              );
+            })}
+          </div>}
+      </section>
 
-                  <div className="mt-3 space-y-1.5">
-                    {(p.prescription_items ?? []).slice(0, 2).map((it) => (
-                      <div key={it.id} className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-1.5 text-xs">
-                        <span className="truncate font-medium text-slate-700">{it.medicine_name}</span>
-                        <span className="shrink-0 text-slate-500">{it.quantity} {it.unit}</span>
-                      </div>
-                    ))}
-                    {(p.prescription_items?.length ?? 0) > 2 && (
-                      <p className="px-1 text-[11px] text-slate-400">+{p.prescription_items!.length - 2} more...</p>
-                    )}
-                  </div>
-
-                  <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3">
-                    <span className="text-xs text-slate-400">Total</span>
-                    <span className="text-sm font-bold text-[#1E88E5]">{fmtKES(rxTotal(p))}</span>
-                  </div>
-
-                  <div className="mt-4 flex gap-2">
-                    <button
-                      onClick={() => setViewing(p)}
-                      className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#1E88E5]/10 py-2 text-xs font-semibold text-[#1E88E5] transition hover:bg-[#1E88E5]/20"
-                    >
-                      <Eye className="h-3.5 w-3.5" /> View
+      {/* INVENTORY */}
+      <section className="rounded-3xl border border-white/60 bg-white/70 p-5 shadow-lg shadow-[#1E88E5]/5 backdrop-blur-md">
+        <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div><h2 className="text-lg font-semibold text-slate-800">Medicine Inventory</h2><p className="text-sm text-slate-500">Manage stock, batch, expiry &amp; pricing</p></div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={openCreateMedicineModal} className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#1E88E5] to-[#64B5F6] px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-[#1E88E5]/30 transition hover:opacity-90"><PackagePlus className="h-4 w-4" /> Add Medicine</button>
+            <button onClick={exportInventory} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"><Download className="h-4 w-4" /> Export CSV</button>
+          </div>
+        </div>
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-2 rounded-xl border border-white/60 bg-white/50 px-3.5 py-2.5 backdrop-blur-md">
+            <Search className="h-4 w-4 text-[#1E88E5]" />
+            <input className="w-40 bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400 sm:w-56" onChange={(e) => setInventorySearch(e.target.value)} placeholder="Search medicine, batch..." value={inventorySearch} />
+          </div>
+          <select className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 outline-none transition focus:border-[#1E88E5]" onChange={(e) => setCategoryFilter(e.target.value)} value={categoryFilter}><option>All</option>{categories.map((c) => <option key={c}>{c}</option>)}</select>
+          <select className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 outline-none transition focus:border-[#1E88E5]" onChange={(e) => setStockFilter(e.target.value as "All" | "Low Stock" | "In Stock" | "Expired")} value={stockFilter}><option>All</option><option>In Stock</option><option>Low Stock</option><option>Expired</option></select>
+        </div>
+        {loading ? <div className="flex h-40 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-[#1E88E5]" /></div>
+        : filteredMedicines.length === 0 ? <div className="flex h-40 flex-col items-center justify-center text-center"><PackagePlus className="mb-2 h-10 w-10 text-slate-300" /><p className="text-sm text-slate-400">No medicines found</p></div>
+        : <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {filteredMedicines.map((m, i) => {
+              const low = m.stock <= m.reorder_level;
+              const exp = expiryWarning(m);
+              return (
+                <motion.div key={m.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }} whileHover={{ y: -4 }} className="rounded-2xl border border-white/60 bg-white p-5 shadow-lg shadow-[#1E88E5]/5 backdrop-blur-md transition hover:shadow-xl">
+                  <div className="mb-3 flex items-start justify-between">
+                    <button className="flex items-center gap-3 text-left" onClick={() => setSelectedMedicine(m)} type="button">
+                      <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-[#1E88E5] to-[#64B5F6] text-white"><Pill className="h-5 w-5" /></div>
+                      <div><p className="text-sm font-semibold text-slate-800">{m.name}</p><p className="text-xs text-slate-400">{m.category} · {m.id}</p></div>
                     </button>
-                    {p.status === "Pending" && (
-                      <button
-                        onClick={() => setDispensing(p)}
-                        className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#2ECC71] py-2 text-xs font-semibold text-white transition hover:bg-[#27AE60]"
-                      >
-                        <PackageCheck className="h-3.5 w-3.5" /> Dispense
-                      </button>
-                    )}
-                    {p.status === "Dispensed" && (
-                      <span className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#2ECC71]/10 py-2 text-xs font-semibold text-[#1E8C4A]">
-                        <CheckCircle2 className="h-3.5 w-3.5" /> Done
-                      </span>
-                    )}
+                    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${exp === "Expired" ? "bg-[#E74C3C]/10 text-[#C0392B] ring-[#E74C3C]/30" : exp ? "bg-[#F1C40F]/15 text-[#B8860B] ring-[#F1C40F]/40" : low ? "bg-[#F1C40F]/15 text-[#B8860B] ring-[#F1C40F]/40" : "bg-[#2ECC71]/10 text-[#1E8C4A] ring-[#2ECC71]/30"}`}>{exp ?? (low ? "Low" : "OK")}</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className="rounded-lg bg-[#F4F6F8] py-2"><p className="text-xs text-slate-400">Stock</p><p className="text-sm font-semibold text-slate-800">{m.stock}</p></div>
+                    <div className="rounded-lg bg-[#F4F6F8] py-2"><p className="text-xs text-slate-400">Price</p><p className="text-sm font-semibold text-slate-800">{fmtKES(Number(m.price))}</p></div>
+                    <div className="rounded-lg bg-[#F4F6F8] py-2"><p className="text-xs text-slate-400">Batch</p><p className="text-sm font-semibold text-slate-800">{m.batch_number ?? "—"}</p></div>
+                  </div>
+                  <div className="mt-3 flex gap-2">
+                    <button onClick={() => setSelectedMedicine(m)} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#1E88E5]/10 py-2 text-xs font-semibold text-[#1E88E5] transition hover:bg-[#1E88E5]/20"><Eye className="h-3.5 w-3.5" /> View</button>
+                    <button onClick={() => openStockModal(m)} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#2ECC71]/10 py-2 text-xs font-semibold text-[#1E8C4A] transition hover:bg-[#2ECC71]/20"><Truck className="h-3.5 w-3.5" /> Stock</button>
+                    <button onClick={() => openEditMedicineModal(m)} className="flex items-center justify-center gap-1.5 rounded-xl bg-[#F1C40F]/15 px-3 py-2 text-xs font-semibold text-[#B8860B] transition hover:bg-[#F1C40F]/25"><Edit3 className="h-3.5 w-3.5" /></button>
                   </div>
                 </motion.div>
               );
             })}
-          </div>
-        )
-      ) : (
-        filteredMeds.length === 0 ? (
-          <EmptyState icon={<Package className="h-8 w-8" />} title="No medicines found" />
-        ) : (
-          <>
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="hidden overflow-hidden rounded-3xl border border-slate-200/70 bg-white shadow-sm lg:block">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-100 text-xs uppercase tracking-wider text-slate-400">
-                      <th className="px-5 py-3 font-medium">Medicine</th>
-                      <th className="px-5 py-3 font-medium">Category</th>
-                      <th className="px-5 py-3 font-medium">Stock</th>
-                      <th className="px-5 py-3 font-medium">Level</th>
-                      <th className="px-5 py-3 text-right font-medium">Unit Price</th>
-                      <th className="px-5 py-3 text-right font-medium">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredMeds.map((m, i) => {
-                      const isLow = m.stock <= m.reorder_level;
-                      const pct = Math.min(100, Math.round((m.stock / (m.reorder_level * 2.5)) * 100));
-                      return (
-                        <motion.tr key={m.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }} className="border-b border-slate-50 transition hover:bg-[#F4F6F8]/60">
-                          <td className="px-5 py-3">
-                            <p className="font-semibold text-slate-800">{m.name}</p>
-                            <p className="text-xs text-slate-400">{m.id}</p>
-                          </td>
-                          <td className="px-5 py-3">
-                            <span className="inline-flex items-center rounded-lg bg-[#F4F6F8] px-2 py-0.5 text-xs font-medium text-slate-600">{m.category}</span>
-                          </td>
-                          <td className="px-5 py-3">
-                            <span className={`font-semibold ${isLow ? "text-[#C0392B]" : "text-slate-700"}`}>{m.stock}</span>
-                            <span className="text-slate-400"> {m.unit}</span>
-                          </td>
-                          <td className="px-5 py-3">
-                            <div className="flex items-center gap-2">
-                              <div className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-100">
-                                <div className={`h-full rounded-full ${isLow ? "bg-[#E74C3C]" : pct < 50 ? "bg-[#F1C40F]" : "bg-[#2ECC71]"}`} style={{ width: `${pct}%` }} />
-                              </div>
-                              {isLow && <AlertTriangle className="h-3.5 w-3.5 text-[#E74C3C]" />}
-                            </div>
-                          </td>
-                          <td className="px-5 py-3 text-right font-medium text-slate-700">{fmtKES(Number(m.price))}</td>
-                          <td className="px-5 py-3 text-right">
-                            <button onClick={() => openRestock(m)} className="inline-flex items-center gap-1.5 rounded-lg bg-[#1E88E5]/10 px-3 py-1.5 text-xs font-semibold text-[#1E88E5] transition hover:bg-[#1E88E5]/20">
-                              <Plus className="h-3.5 w-3.5" /> Restock
-                            </button>
-                          </td>
-                        </motion.tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </motion.div>
+          </div>}
+      </section>
 
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:hidden">
-              {filteredMeds.map((m, i) => {
-                const isLow = m.stock <= m.reorder_level;
-                const pct = Math.min(100, Math.round((m.stock / (m.reorder_level * 2.5)) * 100));
-                return (
-                  <motion.div key={m.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }} className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <p className="font-semibold text-slate-800">{m.name}</p>
-                        <p className="text-xs text-slate-400">{m.category}</p>
-                      </div>
-                      {isLow && <AlertTriangle className="h-4 w-4 text-[#E74C3C]" />}
-                    </div>
-                    <div className="mt-3 flex items-center gap-2">
-                      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100">
-                        <div className={`h-full rounded-full ${isLow ? "bg-[#E74C3C]" : pct < 50 ? "bg-[#F1C40F]" : "bg-[#2ECC71]"}`} style={{ width: `${pct}%` }} />
-                      </div>
-                      <span className={`text-sm font-bold ${isLow ? "text-[#C0392B]" : "text-slate-700"}`}>{m.stock}</span>
-                    </div>
-                    <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3">
-                      <span className="text-xs font-medium text-slate-500">{fmtKES(Number(m.price))}/{m.unit}</span>
-                      <button onClick={() => openRestock(m)} className="inline-flex items-center gap-1.5 rounded-lg bg-[#1E88E5]/10 px-3 py-1.5 text-xs font-semibold text-[#1E88E5]">
-                        <Plus className="h-3.5 w-3.5" /> Restock
-                      </button>
-                    </div>
-                  </motion.div>
-                );
-              })}
-            </div>
-          </>
-        )
-      )}
-
-      {/* ---------------- VIEW MODAL ---------------- */}
-      <Modal open={!!viewing} onClose={() => setViewing(null)} title="Prescription Details" subtitle={viewing?.id} icon={<FileText className="h-5 w-5" />} size="lg">
-        {viewing && (
-          <div className="space-y-5">
-            <div className="flex flex-col gap-4 rounded-2xl bg-gradient-to-r from-[#1E88E5]/5 to-[#64B5F6]/5 p-5 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-center gap-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-[#1E88E5] to-[#64B5F6] text-white">
-                  <Pill className="h-6 w-6" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-slate-900">{patientName(viewing)}</h3>
-                  <p className="text-sm text-slate-500">{viewing.id} · Prescribed by {doctorName(viewing)}</p>
-                </div>
-              </div>
-              <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset ${RX_STATUS[viewing.status].chip}`}>
-                {viewing.status}
-              </span>
-            </div>
-
-            <div className="overflow-hidden rounded-xl border border-slate-100">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="bg-[#F4F6F8] text-[11px] uppercase tracking-wider text-slate-400">
-                    <th className="px-3 py-2 font-medium">Medicine</th>
-                    <th className="px-3 py-2 font-medium">Dosage</th>
-                    <th className="px-3 py-2 text-right font-medium">Qty</th>
-                    <th className="px-3 py-2 text-right font-medium">Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(viewing.prescription_items ?? []).map((it) => (
-                    <tr key={it.id} className="border-t border-slate-50">
-                      <td className="px-3 py-2 font-medium text-slate-700">{it.medicine_name}</td>
-                      <td className="px-3 py-2 text-slate-500">{it.dosage || "—"}</td>
-                      <td className="px-3 py-2 text-right text-slate-600">{it.quantity} {it.unit}</td>
-                      <td className="px-3 py-2 text-right font-medium text-slate-700">{fmtKES(it.quantity * Number(it.unit_price))}</td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="border-t-2 border-slate-200 bg-[#F4F6F8]">
-                    <td colSpan={3} className="px-3 py-2 font-bold text-slate-900">Total</td>
-                    <td className="px-3 py-2 text-right text-lg font-bold text-[#1E88E5]">{fmtKES(rxTotal(viewing))}</td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-
-            {viewing.dispensed_at && (
-              <p className="flex items-center gap-1.5 text-xs text-[#1E8C4A]">
-                <CheckCircle2 className="h-3.5 w-3.5" /> Dispensed on {fmtDateTime(viewing.dispensed_at)}
-              </p>
-            )}
-
-            <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-4">
-              <button onClick={() => setViewing(null)} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-100">
-                Close
-              </button>
-              {viewing.status === "Pending" && (
-                <button onClick={() => { const p = viewing; setViewing(null); setDispensing(p); }} className="inline-flex items-center gap-2 rounded-xl bg-[#2ECC71] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#27AE60]">
-                  <PackageCheck className="h-4 w-4" /> Dispense Medication
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-      </Modal>
-
-      {/* ---------------- DISPENSE MODAL ---------------- */}
-      <Modal open={!!dispensing} onClose={() => setDispensing(null)} title="Dispense Medication" subtitle="Stock will be deducted automatically" icon={<PackageCheck className="h-5 w-5" />}>
-        {dispensing && (
-          <div className="space-y-4">
-            <div className="rounded-xl bg-[#F4F6F8] p-4">
-              <p className="text-sm font-semibold text-slate-800">{patientName(dispensing)}</p>
-              <p className="text-xs text-slate-500">{dispensing.id} · Prescribed by {doctorName(dispensing)}</p>
-            </div>
-
-            <div className="space-y-2">
-              {(dispensing.prescription_items ?? []).map((it) => {
-                const med = medicines.find((m) => m.id === it.medicine_id);
-                const insufficient = med ? med.stock < it.quantity : false;
-                return (
-                  <div key={it.id} className={`flex items-center justify-between rounded-xl border p-3 text-sm ${insufficient ? "border-[#E74C3C]/30 bg-[#E74C3C]/5" : "border-slate-100"}`}>
-                    <div>
-                      <p className="font-medium text-slate-700">{it.medicine_name}</p>
-                      <p className="text-xs text-slate-400">{it.quantity} {it.unit} {med ? `· in stock: ${med.stock}` : ""}</p>
-                    </div>
-                    <span className={`text-xs font-semibold ${insufficient ? "text-[#C0392B]" : "text-slate-600"}`}>{fmtKES(it.quantity * Number(it.unit_price))}</span>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="flex items-center justify-between border-t border-slate-100 pt-3">
-              <span className="font-semibold text-slate-700">Total</span>
-              <span className="text-lg font-bold text-[#1E88E5]">{fmtKES(rxTotal(dispensing))}</span>
-            </div>
-
-            <div className="flex items-center gap-2 rounded-xl bg-[#F1C40F]/10 p-3 text-xs text-[#B8860B]">
-              <AlertTriangle className="h-4 w-4 shrink-0" />
-              This action deducts {dispensing.prescription_items?.length ?? 0} medicine line(s) from inventory and cannot be undone.
-            </div>
-
-            <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-              <button onClick={() => setDispensing(null)} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-100">
-                Cancel
-              </button>
-              <button disabled={saving} onClick={dispense} className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#2ECC71] to-[#58D68D] px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-[#2ECC71]/30 transition hover:from-[#27AE60] hover:to-[#46C57A] disabled:opacity-60">
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <PackageCheck className="h-4 w-4" />}
-                Confirm Dispense
-              </button>
-            </div>
-          </div>
-        )}
-      </Modal>
-
-      {/* ---------------- RESTOCK MODAL ---------------- */}
-      <Modal open={!!restocking} onClose={() => setRestocking(null)} title="Restock Medicine" subtitle={restocking?.name} icon={<Plus className="h-5 w-5" />}>
-        {restocking && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-3 gap-3 text-center">
-              <div className="rounded-xl bg-[#F4F6F8] py-3">
-                <p className="text-xs text-slate-400">Current</p>
-                <p className="text-xl font-bold text-slate-900">{restocking.stock}</p>
-                <p className="text-[10px] text-slate-400">{restocking.unit}</p>
-              </div>
-              <div className="flex items-center justify-center">
-                <ArrowLeftRight className="h-5 w-5 text-slate-300" />
-              </div>
-              <div className="rounded-xl bg-[#2ECC71]/10 py-3">
-                <p className="text-xs text-slate-400">After</p>
-                <p className="text-xl font-bold text-[#1E8C4A]">{restocking.stock + (Number(restockQty) || 0)}</p>
-                <p className="text-[10px] text-slate-400">{restocking.unit}</p>
-              </div>
-            </div>
-            <div>
-              <label className="mb-1.5 block text-xs font-medium text-slate-600">
-                Quantity to add <span className="text-[#E74C3C]">*</span>
-              </label>
-              <input type="number" className={inputCls} value={restockQty} onChange={(e) => setRestockQty(e.target.value)} placeholder="e.g. 50" />
-            </div>
-            <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-              <button onClick={() => setRestocking(null)} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-100">
-                Cancel
-              </button>
-              <button disabled={saving} onClick={submitRestock} className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#1E88E5] to-[#64B5F6] px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-[#1E88E5]/30 transition hover:from-[#1976D2] hover:to-[#42A5F5] disabled:opacity-60">
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                Add Stock
-              </button>
-            </div>
-          </div>
-        )}
-      </Modal>
-
-      {/* ---------------- TOAST ---------------- */}
+      {/* MODALS */}
       <AnimatePresence>
-        {toast && (
-          <motion.div
-            initial={{ opacity: 0, y: 30, x: "-50%" }}
-            animate={{ opacity: 1, y: 0, x: "-50%" }}
-            exit={{ opacity: 0, y: 30, x: "-50%" }}
-            className={`fixed bottom-24 left-1/2 z-[60] flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold text-white shadow-xl lg:bottom-6 ${
-              toast.type === "success" ? "bg-[#2ECC71]" : toast.type === "error" ? "bg-[#E74C3C]" : "bg-[#1E88E5]"
-            }`}
-          >
-            {toast.type === "success" ? <CheckCircle2 className="h-4 w-4" /> : toast.type === "error" ? <AlertTriangle className="h-4 w-4" /> : <Activity className="h-4 w-4" />}
-            {toast.message}
-          </motion.div>
+        {selectedPrescription && (
+          <DispenseModal
+            doctor={doctorMap.get(selectedPrescription.doctor_id)} items={selectedItems} medicines={medicineMap}
+            onClose={() => setSelectedPrescription(null)} onDispense={() => void dispensePrescription(selectedPrescription)}
+            patient={patientMap.get(selectedPrescription.patient_id)} prescription={selectedPrescription} saving={saving}
+          />
         )}
       </AnimatePresence>
+      <AnimatePresence>{medicineModalMode && <MedicineFormModal form={medicineForm} mode={medicineModalMode} onChange={setMedicineForm} onClose={() => setMedicineModalMode(null)} onSubmit={handleMedicineSubmit} saving={saving} />}</AnimatePresence>
+      <AnimatePresence>{prescriptionModalOpen && <PrescriptionFormModal doctors={doctors} form={prescriptionForm} medicines={medicines} onChange={setPrescriptionForm} onClose={() => setPrescriptionModalOpen(false)} onSubmit={handlePrescriptionSubmit} patients={patients} saving={saving} />}</AnimatePresence>
+      <AnimatePresence>{stockModalOpen && <StockModal form={stockForm} medicines={medicines} onChange={setStockForm} onClose={() => setStockModalOpen(false)} onSubmit={receiveStock} saving={saving} />}</AnimatePresence>
+      <AnimatePresence>{selectedMedicine && <MedicineDetailModal medicine={selectedMedicine} onClose={() => setSelectedMedicine(null)} onEdit={() => { openEditMedicineModal(selectedMedicine); setSelectedMedicine(null); }} onStock={() => { openStockModal(selectedMedicine); setSelectedMedicine(null); }} />}</AnimatePresence>
     </div>
   );
 }
 
-/* ============================ SUBCOMPONENTS ============================ */
+/* ---------- HELPERS ---------- */
 
-function StatCard({
-  label,
-  value,
-  icon: Icon,
-  gradient,
-  delta,
-  money,
-}: {
-  label: string;
-  value: number;
-  icon: typeof Pill;
-  gradient: string;
-  delta: string;
-  money?: boolean;
-}) {
-  const [display, setDisplay] = useState(0);
-  useEffect(() => {
-    const controls = animate(0, value, {
-      duration: 0.9,
-      ease: "easeOut",
-      onUpdate: (v) => setDisplay(Math.round(v)),
-    });
-    return () => controls.stop();
-  }, [value]);
+function fmtKES(n: number) { return "KES " + n.toLocaleString("en-KE"); }
+
+function expiryWarning(m: MedicineRow) {
+  if (!m.expiry_date) return null;
+  const days = Math.ceil((new Date(m.expiry_date + "T00:00:00").getTime() - Date.now()) / 86400000);
+  if (days < 0) return "Expired";
+  if (days <= 90) return `Expires in ${days}d`;
+  return null;
+}
+
+/* ---------- MODAL COMPONENTS ---------- */
+
+function DispenseModal({ prescription, patient, doctor, items, medicines, saving, onClose, onDispense }: { prescription: PrescriptionRow; patient?: PatientRow; doctor?: DoctorRow; items: PrescriptionItemRow[]; medicines: Map<string, MedicineRow>; saving: boolean; onClose: () => void; onDispense: () => void }) {
+  const total = items.reduce((s, i) => s + i.quantity * Number(i.unit_price), 0);
+  const allergies = patient?.allergies ?? "";
+  const allergyWarn = items.filter((i) => allergies.toLowerCase().includes(i.medicine_name.toLowerCase().split(" ")[0]));
+  const expired = items.map((i) => medicines.get(i.medicine_id)).filter((m): m is MedicineRow => Boolean(m && expiryWarning(m)));
+  const insufficient = items.find((i) => (medicines.get(i.medicine_id)?.stock ?? 0) < i.quantity);
+  const canDispense = !insufficient && prescription.status === "Pending" && allergyWarn.length === 0 && expired.length === 0;
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      whileHover={{ y: -4 }}
-      className="group relative overflow-hidden rounded-2xl border border-slate-200/70 bg-white p-5 shadow-sm"
-    >
-      <div className={`pointer-events-none absolute -right-6 -top-6 h-20 w-20 rounded-full bg-gradient-to-br ${gradient} opacity-10 transition group-hover:scale-150`} />
+    <Modal onClose={onClose} title="Dispense Medication">
+      <div className="space-y-4">
+        <div className="rounded-2xl bg-gradient-to-r from-[#1E88E5]/5 to-[#64B5F6]/5 p-4">
+          <div className="flex items-center justify-between">
+            <div><h3 className="text-lg font-bold text-slate-900">{patient?.name ?? prescription.patient_id}</h3><p className="text-sm text-slate-500">{prescription.id} · {doctor?.name ?? "—"}</p></div>
+            <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset ${prescription.status === "Dispensed" ? "bg-[#2ECC71]/10 text-[#1E8C4A] ring-[#2ECC71]/30" : "bg-[#F1C40F]/15 text-[#B8860B] ring-[#F1C40F]/40"}`}>{prescription.status}</span>
+          </div>
+          {allergies && <p className="mt-2 text-xs text-[#C0392B]">⚠ Patient Allergies: {allergies}</p>}
+        </div>
+
+        {allergyWarn.length > 0 && <div className="rounded-xl border border-[#E74C3C]/30 bg-[#E74C3C]/10 p-3 text-sm font-medium text-[#C0392B]">⚠ Allergy conflict: {allergyWarn.map((w) => w.medicine_name).join(", ")}</div>}
+        {expired.length > 0 && <div className="rounded-xl border border-[#E74C3C]/30 bg-[#E74C3C]/10 p-3 text-sm font-medium text-[#C0392B]">⚠ Expired: {expired.map((m) => m.name).join(", ")}</div>}
+        {insufficient && <div className="rounded-xl border border-[#F1C40F]/30 bg-[#F1C40F]/10 p-3 text-sm font-medium text-[#B8860B]">⚠ Insufficient stock: {insufficient.medicine_name}</div>}
+
+        <div className="overflow-hidden rounded-xl border border-slate-100">
+          <table className="w-full text-left text-sm">
+            <thead><tr className="bg-[#F4F6F8] text-[11px] uppercase tracking-wider text-slate-400"><th className="px-3 py-2">Medicine</th><th className="px-3 py-2">Dosage</th><th className="px-3 py-2">Qty</th><th className="px-3 py-2">Stock</th><th className="px-3 py-2 text-right">Amount</th></tr></thead>
+            <tbody>
+              {items.map((it) => { const med = medicines.get(it.medicine_id); const enough = (med?.stock ?? 0) >= it.quantity; return (
+                <tr key={it.id} className="border-t border-slate-50">
+                  <td className="px-3 py-2 font-medium text-slate-700">{it.medicine_name}</td>
+                  <td className="px-3 py-2 text-slate-500">{it.dosage || "—"}</td>
+                  <td className="px-3 py-2 text-slate-600">{it.quantity} {it.unit}</td>
+                  <td className={`px-3 py-2 font-semibold ${enough ? "text-[#1E8C4A]" : "text-[#C0392B]"}`}>{med?.stock ?? 0}</td>
+                  <td className="px-3 py-2 text-right font-medium text-slate-700">{fmtKES(it.quantity * Number(it.unit_price))}</td>
+                </tr>); })}
+            </tbody>
+            <tfoot><tr className="border-t-2 border-slate-200 bg-[#F4F6F8]"><td colSpan={4} className="px-3 py-2 font-semibold text-slate-900">Total</td><td className="px-3 py-2 text-right text-base font-bold text-[#1E88E5]">{fmtKES(total)}</td></tr></tfoot>
+          </table>
+        </div>
+        <div className="rounded-xl bg-[#1E88E5]/5 p-3 text-xs text-[#1E88E5]">Auto-billing: a pending invoice with line items will be created for this patient.</div>
+        <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+          <button onClick={onClose} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-100">Close</button>
+          <button disabled={!canDispense || saving} onClick={onDispense} className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#2ECC71] to-[#58D68D] px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-[#2ECC71]/30 transition hover:from-[#27AE60] hover:to-[#46C57A] disabled:opacity-50">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <PackageCheck className="h-4 w-4" />} Confirm Dispense</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function MedicineFormModal({ form, mode, saving, onChange, onClose, onSubmit }: { form: MedicineForm; mode: "create" | "edit"; saving: boolean; onChange: (f: MedicineForm) => void; onClose: () => void; onSubmit: (e: FormEvent<HTMLFormElement>) => void }) {
+  return (
+    <Modal onClose={onClose} title={mode === "create" ? "Add Medicine" : "Edit Medicine"}>
+      <form className="grid gap-4 sm:grid-cols-2" onSubmit={onSubmit}>
+        <Field label="Medicine ID"><input className={inputClass} disabled={mode === "edit"} value={form.id} onChange={(e) => onChange({ ...form, id: e.target.value })} /></Field>
+        <Field label="Name" required><input className={inputClass} value={form.name} onChange={(e) => onChange({ ...form, name: e.target.value })} placeholder="e.g. Paracetamol 500mg" /></Field>
+        <Field label="Category"><select className={inputClass} value={form.category} onChange={(e) => onChange({ ...form, category: e.target.value })}>{categories.map((c) => <option key={c}>{c}</option>)}</select></Field>
+        <Field label="Unit"><select className={inputClass} value={form.unit} onChange={(e) => onChange({ ...form, unit: e.target.value })}>{units.map((u) => <option key={u}>{u}</option>)}</select></Field>
+        <Field label="Stock"><input type="number" className={inputClass} value={form.stock} onChange={(e) => onChange({ ...form, stock: e.target.value })} /></Field>
+        <Field label="Reorder Level"><input type="number" className={inputClass} value={form.reorder_level} onChange={(e) => onChange({ ...form, reorder_level: e.target.value })} /></Field>
+        <Field label="Price (KES)"><input type="number" className={inputClass} value={form.price} onChange={(e) => onChange({ ...form, price: e.target.value })} /></Field>
+        <Field label="Expiry Date"><input type="date" className={inputClass} value={form.expiry_date} onChange={(e) => onChange({ ...form, expiry_date: e.target.value })} /></Field>
+        <Field label="Batch Number"><input className={inputClass} value={form.batch_number} onChange={(e) => onChange({ ...form, batch_number: e.target.value })} placeholder="e.g. BATCH-2024-001" /></Field>
+        <Field label="Supplier"><input className={inputClass} value={form.supplier} onChange={(e) => onChange({ ...form, supplier: e.target.value })} placeholder="e.g. Phillips Pharma" /></Field>
+        <Field label="Location"><input className={inputClass} value={form.location} onChange={(e) => onChange({ ...form, location: e.target.value })} /></Field>
+        <label className="flex items-center gap-3 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700"><input type="checkbox" checked={form.is_active} onChange={(e) => onChange({ ...form, is_active: e.target.checked })} /> Active</label>
+        <div className="flex justify-end gap-2 border-t border-slate-100 pt-4 sm:col-span-2">
+          <button type="button" onClick={onClose} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-100">Cancel</button>
+          <button type="submit" disabled={saving} className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#1E88E5] to-[#64B5F6] px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-[#1E88E5]/30 transition hover:opacity-90 disabled:opacity-60">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : mode === "create" ? <Plus className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}{mode === "create" ? "Add Medicine" : "Save Changes"}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function PrescriptionFormModal({ form, patients, doctors, medicines, saving, onChange, onClose, onSubmit }: { form: PrescriptionForm; patients: PatientRow[]; doctors: DoctorRow[]; medicines: MedicineRow[]; saving: boolean; onChange: (f: PrescriptionForm) => void; onClose: () => void; onSubmit: (e: FormEvent<HTMLFormElement>) => void }) {
+  return (
+    <Modal onClose={onClose} title="New Prescription">
+      <form className="grid gap-4 sm:grid-cols-2" onSubmit={onSubmit}>
+        <Field label="Prescription ID"><input className={inputClass} value={form.id} onChange={(e) => onChange({ ...form, id: e.target.value })} /></Field>
+        <Field label="Patient" required><select className={inputClass} value={form.patient_id} onChange={(e) => onChange({ ...form, patient_id: e.target.value })}><option value="">Select patient...</option>{patients.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field>
+        <Field label="Doctor" required><select className={inputClass} value={form.doctor_id} onChange={(e) => onChange({ ...form, doctor_id: e.target.value })}><option value="">Select doctor...</option>{doctors.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></Field>
+        <Field label="Medicine" required><select className={inputClass} value={form.medicine_id} onChange={(e) => onChange({ ...form, medicine_id: e.target.value })}><option value="">Select medicine...</option>{medicines.map((m) => <option key={m.id} value={m.id}>{m.name} ({m.stock} {m.unit})</option>)}</select></Field>
+        <Field label="Dosage"><input className={inputClass} value={form.dosage} onChange={(e) => onChange({ ...form, dosage: e.target.value })} placeholder="e.g. 1 tab TDS" /></Field>
+        <Field label="Quantity"><input type="number" className={inputClass} value={form.quantity} onChange={(e) => onChange({ ...form, quantity: e.target.value })} /></Field>
+        <div className="flex justify-end gap-2 border-t border-slate-100 pt-4 sm:col-span-2">
+          <button type="button" onClick={onClose} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-100">Cancel</button>
+          <button type="submit" disabled={saving} className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#1E88E5] to-[#64B5F6] px-5 py-2.5 text-sm font-semibold text-white shadow-md disabled:opacity-60">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}Create Prescription</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function StockModal({ form, medicines, saving, onChange, onClose, onSubmit }: { form: StockForm; medicines: MedicineRow[]; saving: boolean; onChange: (f: StockForm) => void; onClose: () => void; onSubmit: (e: FormEvent<HTMLFormElement>) => void }) {
+  return (
+    <Modal onClose={onClose} title="Receive Stock">
+      <form className="grid gap-4 sm:grid-cols-2" onSubmit={onSubmit}>
+        <Field label="Medicine" required className="sm:col-span-2"><select className={inputClass} value={form.medicine_id} onChange={(e) => onChange({ ...form, medicine_id: e.target.value })}><option value="">Select medicine...</option>{medicines.map((m) => <option key={m.id} value={m.id}>{m.name} ({m.stock} {m.unit})</option>)}</select></Field>
+        <Field label="Quantity Received" required><input type="number" className={inputClass} value={form.quantity} onChange={(e) => onChange({ ...form, quantity: e.target.value })} /></Field>
+        <Field label="Batch Number"><input className={inputClass} value={form.batch_number} onChange={(e) => onChange({ ...form, batch_number: e.target.value })} placeholder="e.g. BATCH-2024-001" /></Field>
+        <Field label="Supplier"><input className={inputClass} value={form.supplier} onChange={(e) => onChange({ ...form, supplier: e.target.value })} placeholder="e.g. Phillips Pharma" /></Field>
+        <Field label="Expiry Date"><input type="date" className={inputClass} value={form.expiry_date} onChange={(e) => onChange({ ...form, expiry_date: e.target.value })} /></Field>
+        <Field label="Location"><input className={inputClass} value={form.location} onChange={(e) => onChange({ ...form, location: e.target.value })} /></Field>
+        <Field label="Reason"><input className={inputClass} value={form.reason} onChange={(e) => onChange({ ...form, reason: e.target.value })} /></Field>
+        <div className="rounded-xl bg-[#2ECC71]/5 p-3 text-xs text-[#1E8C4A] sm:col-span-2">Stock movement will be logged for audit trail.</div>
+        <div className="flex justify-end gap-2 border-t border-slate-100 pt-4 sm:col-span-2">
+          <button type="button" onClick={onClose} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-100">Cancel</button>
+          <button type="submit" disabled={saving} className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#2ECC71] to-[#58D68D] px-5 py-2.5 text-sm font-semibold text-white shadow-md disabled:opacity-60">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Truck className="h-4 w-4" />}Update Stock</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function MedicineDetailModal({ medicine, onClose, onEdit, onStock }: { medicine: MedicineRow; onClose: () => void; onEdit: () => void; onStock: () => void }) {
+  const exp = expiryWarning(medicine);
+  return (
+    <Modal onClose={onClose} title="Medicine Details">
+      <div className="space-y-4">
+        <div className="rounded-2xl bg-gradient-to-r from-[#1E88E5]/5 to-[#64B5F6]/5 p-5">
+          <div className="flex items-center gap-4">
+            <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-gradient-to-br from-[#1E88E5] to-[#64B5F6] text-white"><Pill className="h-7 w-7" /></div>
+            <div className="flex-1">
+              <h3 className="text-lg font-bold text-slate-900">{medicine.name}</h3>
+              <p className="text-sm text-slate-500">{medicine.id} · {medicine.category}</p>
+            </div>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <MiniInfo label="Stock" value={`${medicine.stock} ${medicine.unit}`} />
+          <MiniInfo label="Price" value={fmtKES(Number(medicine.price))} />
+          <MiniInfo label="Reorder At" value={`${medicine.reorder_level}`} />
+          <MiniInfo label="Status" value={medicine.is_active === false ? "Inactive" : "Active"} />
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <MiniInfo label="Batch Number" value={medicine.batch_number || "Not set"} />
+          <MiniInfo label="Supplier" value={medicine.supplier || "Not set"} />
+          <MiniInfo label="Location" value={medicine.location || "Main Pharmacy"} />
+        </div>
+        <div className="rounded-xl border border-slate-100 p-4">
+          <p className="text-xs font-semibold text-slate-400">Expiry Date</p>
+          <p className={`mt-1 text-sm font-medium ${exp ? "text-[#C0392B]" : "text-slate-700"}`}>{medicine.expiry_date ? new Date(medicine.expiry_date).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "Not recorded"}{exp ? ` — ${exp}` : ""}</p>
+        </div>
+        {medicine.last_restocked_at && <p className="text-xs text-slate-400">Last restocked: {new Date(medicine.last_restocked_at).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</p>}
+        <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+          <button onClick={onClose} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-100">Close</button>
+          <button onClick={onStock} className="inline-flex items-center gap-2 rounded-xl bg-[#2ECC71] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#27AE60]"><Truck className="h-4 w-4" /> Receive Stock</button>
+          <button onClick={onEdit} className="inline-flex items-center gap-2 rounded-xl bg-[#1E88E5] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#1976D2]"><Edit3 className="h-4 w-4" /> Edit</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/* ---------- SHARED COMPONENTS ---------- */
+
+function MetricCard({ icon: Icon, label, value, tone, money = false }: { icon: LucideIcon; label: string; value: number; tone: "blue" | "green" | "yellow" | "red"; money?: boolean }) {
+  const toneMap = { blue: "from-[#1E88E5] to-[#64B5F6]", green: "from-[#2ECC71] to-[#58D68D]", yellow: "from-[#F1C40F] to-[#F39C12]", red: "from-[#E74C3C] to-[#EC7063]" };
+  return (
+    <motion.div className="overflow-hidden rounded-2xl border border-white/60 bg-white/70 p-5 shadow-lg shadow-[#1E88E5]/5 backdrop-blur-md" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} whileHover={{ y: -4 }}>
+      <div className={`pointer-events-none absolute -right-6 -top-6 h-20 w-20 rounded-full bg-gradient-to-br ${toneMap[tone]} opacity-10`} />
       <div className="relative flex items-start justify-between">
-        <div>
-          <p className="text-sm font-medium text-slate-500">{label}</p>
-          <p className="mt-2 text-2xl font-bold tracking-tight text-slate-900">
-            {money ? fmtKES(display) : display.toLocaleString()}
-          </p>
-          <p className="mt-1 text-xs text-slate-400">{delta}</p>
-        </div>
-        <div className={`flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br ${gradient} text-white shadow-lg`}>
-          <Icon className="h-5 w-5" />
-        </div>
+        <div><p className="text-sm font-medium text-slate-500">{label}</p><p className={`mt-2 bg-gradient-to-r ${toneMap[tone]} bg-clip-text text-2xl font-bold tracking-tight text-transparent`}>{money ? fmtKES(value) : value.toLocaleString()}</p></div>
+        <div className={`flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br ${toneMap[tone]} text-white shadow-lg`}><Icon className="h-5 w-5" /></div>
       </div>
     </motion.div>
   );
 }
 
-function EmptyState({ icon, title }: { icon: React.ReactNode; title: string }) {
-  return (
-    <div className="flex flex-col items-center justify-center rounded-3xl border border-slate-200/70 bg-white py-16 text-center">
-      <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-[#F4F6F8] text-slate-400">
-        {icon}
-      </div>
-      <p className="font-semibold text-slate-700">{title}</p>
-      <p className="mt-1 text-sm text-slate-400">Try adjusting your search or filters.</p>
-    </div>
-  );
+function MiniInfo({ label, value }: { label: string; value: string }) {
+  return <div className="rounded-xl border border-slate-100 bg-[#F4F6F8] p-3"><p className="text-[10px] font-medium uppercase tracking-wider text-slate-400">{label}</p><p className="mt-1 text-sm font-semibold text-slate-700">{value}</p></div>;
 }
 
-function FilterPills({ options, value, onChange }: { options: string[]; value: string; onChange: (v: string) => void }) {
-  return (
-    <div className="flex flex-wrap gap-1 rounded-xl bg-[#F4F6F8] p-1">
-      {options.map((o) => (
-        <button
-          key={o}
-          onClick={() => onChange(o)}
-          className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
-            value === o ? "bg-white text-[#1E88E5] shadow-sm" : "text-slate-500 hover:text-slate-700"
-          }`}
-        >
-          {o}
-        </button>
-      ))}
-    </div>
-  );
+function Field({ children, label, className, required }: { children: ReactNode; label: string; className?: string; required?: boolean }) {
+  return <label className={`block ${className ?? ""}`}><span className="mb-1.5 block text-xs font-medium text-slate-600">{label}{required && <span className="text-[#E74C3C]"> *</span>}</span>{children}</label>;
 }
 
-function Modal({
-  open,
-  onClose,
-  title,
-  subtitle,
-  icon,
-  size = "md",
-  children,
-}: {
-  open: boolean;
-  onClose: () => void;
-  title: string;
-  subtitle?: string;
-  icon?: React.ReactNode;
-  size?: "md" | "lg";
-  children: React.ReactNode;
-}) {
+function Modal({ children, onClose, title }: { children: ReactNode; onClose: () => void; title: string }) {
   return (
-    <AnimatePresence>
-      {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" />
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            transition={{ duration: 0.25 }}
-            className={`relative z-10 max-h-[90vh] w-full overflow-y-auto rounded-3xl bg-white shadow-2xl ${size === "lg" ? "max-w-2xl" : "max-w-xl"}`}
-          >
-            <div className="sticky top-0 z-10 flex items-start justify-between border-b border-slate-100 bg-white/95 px-6 py-4 backdrop-blur">
-              <div className="flex items-center gap-3">
-                {icon && (
-                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#1E88E5]/10 text-[#1E88E5]">
-                    {icon}
-                  </div>
-                )}
-                <div>
-                  <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
-                  {subtitle && <p className="text-sm text-slate-500">{subtitle}</p>}
-                </div>
-              </div>
-              <button onClick={onClose} className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="px-6 py-5">{children}</div>
-          </motion.div>
+    <motion.div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
+      <motion.div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white shadow-2xl" initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }} transition={{ duration: 0.25 }} onClick={(e) => e.stopPropagation()}>
+        <div className="sticky top-0 z-10 flex items-start justify-between border-b border-slate-100 bg-white/95 px-6 py-4 backdrop-blur">
+          <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
+          <button onClick={onClose} className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"><X className="h-5 w-5" /></button>
         </div>
-      )}
-    </AnimatePresence>
+        <div className="px-6 py-5">{children}</div>
+      </motion.div>
+    </motion.div>
   );
 }
+
+const inputClass = "w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#1E88E5] focus:ring-2 focus:ring-[#1E88E5]/20 disabled:bg-slate-50 disabled:text-slate-400";

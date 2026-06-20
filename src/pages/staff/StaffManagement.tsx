@@ -40,6 +40,12 @@ import {
   KeyRound,
   Copy,
   LogIn,
+  ShieldBan,
+  ShieldOff,
+  CalendarDays,
+  ListChecks,
+  BarChart3,
+  Plus,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
@@ -60,6 +66,34 @@ interface StaffMember {
   status: DutyStatus;
   auth_user_id: string | null;
   created_at: string;
+  license_number?: string | null;
+  license_expiry?: string | null;
+  account_status?: string | null;
+}
+
+interface Shift {
+  id: number;
+  staff_id: string;
+  day_of_week: string;
+  shift_type: string;
+}
+
+interface LeaveRequest {
+  id: number;
+  staff_id: string;
+  leave_type: string;
+  start_date: string;
+  end_date: string;
+  reason: string | null;
+  status: string;
+  requested_at: string;
+}
+
+interface Metrics {
+  consultations: number;
+  appointments: number;
+  prescriptions: number;
+  lab_tests: number;
 }
 
 interface FormState {
@@ -70,6 +104,16 @@ interface FormState {
   specialization: string;
   department: string;
   status: DutyStatus;
+  license_number: string;
+  license_expiry: string;
+}
+
+interface LeaveFormState {
+  staff_id: string;
+  leave_type: string;
+  start_date: string;
+  end_date: string;
+  reason: string;
 }
 
 /* ============================ THEME ============================ */
@@ -91,6 +135,16 @@ const DUTY_META: Record<DutyStatus, { chip: string; dot: string }> = {
   "Off Duty": { chip: "bg-slate-100 text-slate-500 ring-slate-200", dot: "#94a3b8" },
 };
 
+const SHIFT_COLORS: Record<string, string> = {
+  "Day": "bg-[#1E88E5]/10 text-[#1E88E5] border-[#1E88E5]/30",
+  "Evening": "bg-[#F1C40F]/10 text-[#B8860B] border-[#F1C40F]/30",
+  "Night": "bg-violet-100 text-violet-700 border-violet-300",
+  "Off": "bg-slate-100 text-slate-400 border-slate-200",
+};
+
+const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const SHIFT_TYPES = ["Day", "Evening", "Night", "Off"];
+
 const DEPARTMENTS = [
   "General Medicine",
   "Cardiology",
@@ -106,6 +160,7 @@ const DEPARTMENTS = [
 ];
 
 const ROLES = Object.keys(ROLE_META) as Role[];
+const LEAVE_TYPES = ["Annual", "Sick", "Maternity", "Emergency", "Study"];
 
 const emptyForm: FormState = {
   name: "",
@@ -115,6 +170,16 @@ const emptyForm: FormState = {
   specialization: "",
   department: "General Medicine",
   status: "On Duty",
+  license_number: "",
+  license_expiry: "",
+};
+
+const emptyLeaveForm: LeaveFormState = {
+  staff_id: "",
+  leave_type: "Annual",
+  start_date: "",
+  end_date: "",
+  reason: "",
 };
 
 const inputCls =
@@ -128,12 +193,21 @@ const initials = (name: string) =>
 const fmtDate = (iso: string) =>
   new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 
+const daysUntil = (iso: string | null | undefined): number | null => {
+  if (!iso) return null;
+  return Math.ceil((new Date(iso).getTime() - Date.now()) / 86400000);
+};
+
 /* ============================ COMPONENT ============================ */
 
 export default function StaffManagement() {
   const { profile } = useAuth();
 
+  const [tab, setTab] = useState<"directory" | "roster" | "leave">("directory");
+
   const [staff, setStaff] = useState<StaffMember[]>([]);
+  const [shifts, setShifts] = useState<Shift[]>([]);
+  const [leave, setLeave] = useState<LeaveRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -145,7 +219,9 @@ export default function StaffManagement() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<StaffMember | null>(null);
   const [viewing, setViewing] = useState<StaffMember | null>(null);
+  const [viewMetrics, setViewMetrics] = useState<Metrics | null>(null);
   const [deleting, setDeleting] = useState<StaffMember | null>(null);
+  const [leaveFormOpen, setLeaveFormOpen] = useState(false);
 
   // login provisioning
   const [provisioningStaff, setProvisioningStaff] = useState<StaffMember | null>(null);
@@ -153,6 +229,7 @@ export default function StaffManagement() {
   const [copied, setCopied] = useState(false);
 
   const [form, setForm] = useState<FormState>(emptyForm);
+  const [leaveForm, setLeaveForm] = useState<LeaveFormState>(emptyLeaveForm);
   const [saving, setSaving] = useState(false);
 
   const [toast, setToast] = useState<{ type: "success" | "error" | "info"; message: string } | null>(null);
@@ -164,18 +241,27 @@ export default function StaffManagement() {
   /* ---------------- LOAD ---------------- */
   const load = useCallback(async () => {
     try {
-      // Never select password_hash.
-      const { data, error: err } = await supabase
-        .schema("medicore")
-        .from("staff")
-        .select("id, name, email, phone, role, specialization, department, status, auth_user_id, created_at")
-        .order("name");
-      if (err) throw err;
-      setStaff((data as StaffMember[]) ?? []);
+      const [staffRes, shiftRes, leaveRes] = await Promise.all([
+        supabase
+          .schema("medicore")
+          .from("staff")
+          .select("id, name, email, phone, role, specialization, department, status, auth_user_id, created_at, license_number, license_expiry, account_status")
+          .order("name"),
+        supabase.schema("medicore").from("staff_shifts").select("*"),
+        supabase.schema("medicore").from("leave_requests").select("*").order("requested_at", { ascending: false }),
+      ]);
+
+      if (staffRes.error) throw staffRes.error;
+      if (shiftRes.error) throw shiftRes.error;
+      if (leaveRes.error) throw leaveRes.error;
+
+      setStaff((staffRes.data as StaffMember[]) ?? []);
+      setShifts((shiftRes.data as Shift[]) ?? []);
+      setLeave((leaveRes.data as LeaveRequest[]) ?? []);
       setError(null);
     } catch (e) {
       console.error("[Staff] load error:", e);
-      setError("Failed to load staff. Check schema exposure + RLS.");
+      setError("Failed to load. Run staff-hr-upgrade.sql + check RLS.");
     } finally {
       setLoading(false);
     }
@@ -190,6 +276,8 @@ export default function StaffManagement() {
     const channel = supabase
       .channel("medicore-staff-mgmt")
       .on("postgres_changes", { event: "*", schema: "medicore", table: "staff" }, () => void load())
+      .on("postgres_changes", { event: "*", schema: "medicore", table: "staff_shifts" }, () => void load())
+      .on("postgres_changes", { event: "*", schema: "medicore", table: "leave_requests" }, () => void load())
       .subscribe();
     return () => {
       supabase.removeChannel(channel);
@@ -218,7 +306,13 @@ export default function StaffManagement() {
       const now = new Date();
       return created.getMonth() === now.getMonth() && created.getFullYear() === now.getFullYear();
     }).length,
-  }), [staff]);
+    suspended: staff.filter((s) => s.account_status === "Suspended").length,
+    pendingLeave: leave.filter((l) => l.status === "Pending").length,
+    onLeave: staff.filter((s) => {
+      const today = new Date().toISOString().split("T")[0];
+      return leave.some((l) => l.staff_id === s.id && l.status === "Approved" && l.start_date <= today && l.end_date >= today);
+    }).length,
+  }), [staff, leave]);
 
   const roleData = useMemo(
     () =>
@@ -255,6 +349,8 @@ export default function StaffManagement() {
       specialization: s.specialization ?? "",
       department: s.department ?? "General Medicine",
       status: s.status,
+      license_number: s.license_number ?? "",
+      license_expiry: s.license_expiry ?? "",
     });
     setEditing(s);
     setViewing(null);
@@ -276,6 +372,8 @@ export default function StaffManagement() {
         specialization: form.specialization.trim() || null,
         department: form.department,
         status: form.status,
+        license_number: form.license_number.trim() || null,
+        license_expiry: form.license_expiry || null,
       };
 
       if (editing) {
@@ -288,9 +386,6 @@ export default function StaffManagement() {
         showToast("success", `${editing.id} updated successfully.`);
       } else {
         const id = `STF-${String(staff.length + 1).padStart(3, "0")}`;
-        // password_hash is NOT NULL in the schema. The client must not handle real
-        // passwords, so we insert a placeholder flag here; real auth credentials are
-        // set up separately (auth.users + auth-staff-link.sql).
         const { error: e } = await supabase
           .schema("medicore")
           .from("staff")
@@ -322,11 +417,97 @@ export default function StaffManagement() {
     }
   };
 
-  /* ---------------- PROVISION LOGIN (Edge Function) ---------------- */
+  const toggleAccountStatus = async (s: StaffMember) => {
+    const next = s.account_status === "Suspended" ? "Active" : "Suspended";
+    try {
+      const { error: e } = await supabase.schema("medicore").from("staff").update({ account_status: next }).eq("id", s.id);
+      if (e) throw e;
+      showToast("info", `${s.name}'s account is now ${next}.`);
+      if (viewing) setViewing({ ...s, account_status: next });
+      await load();
+    } catch (e) {
+      console.error("[Staff] toggle status error:", e);
+      showToast("error", "Could not update account status.");
+    }
+  };
+
+  const updateShift = async (staffId: string, day: string, shiftType: string) => {
+    try {
+      const existing = shifts.find((sh) => sh.staff_id === staffId && sh.day_of_week === day);
+      if (existing) {
+        await supabase.schema("medicore").from("staff_shifts").update({ shift_type: shiftType }).eq("id", existing.id);
+      } else {
+        await supabase.schema("medicore").from("staff_shifts").insert({ staff_id: staffId, day_of_week: day, shift_type: shiftType });
+      }
+      await load();
+    } catch (e) {
+      showToast("error", "Could not update shift.");
+    }
+  };
+
+  const approveLeave = async (id: number, status: "Approved" | "Rejected") => {
+    try {
+      const { error: e } = await supabase.schema("medicore").from("leave_requests").update({ status }).eq("id", id);
+      if (e) throw e;
+      showToast("success", `Leave ${status}.`);
+      await load();
+    } catch {
+      showToast("error", "Could not update leave.");
+    }
+  };
+
+  const submitLeave = async () => {
+    if (!leaveForm.staff_id || !leaveForm.start_date || !leaveForm.end_date) {
+      showToast("error", "Fill in all required fields.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const { error: e } = await supabase.schema("medicore").from("leave_requests").insert({
+        staff_id: leaveForm.staff_id,
+        leave_type: leaveForm.leave_type,
+        start_date: leaveForm.start_date,
+        end_date: leaveForm.end_date,
+        reason: leaveForm.reason.trim() || null,
+        status: "Pending",
+      });
+      if (e) throw e;
+      showToast("success", "Leave request submitted.");
+      setLeaveFormOpen(false);
+      setLeaveForm(emptyLeaveForm);
+      await load();
+    } catch {
+      showToast("error", "Could not submit leave.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openView = async (s: StaffMember) => {
+    setViewing(s);
+    setViewMetrics(null);
+    try {
+      const [con, apt, rx, lab] = await Promise.all([
+        supabase.schema("medicore").from("consultations").select("id", { count: "exact", head: true }).eq("doctor_id", s.id),
+        supabase.schema("medicore").from("appointments").select("id", { count: "exact", head: true }).eq("doctor_id", s.id),
+        supabase.schema("medicore").from("prescriptions").select("id", { count: "exact", head: true }).eq("doctor_id", s.id),
+        supabase.schema("medicore").from("lab_tests").select("id", { count: "exact", head: true }).eq("doctor_id", s.id),
+      ]);
+      setViewMetrics({
+        consultations: con.count ?? 0,
+        appointments: apt.count ?? 0,
+        prescriptions: rx.count ?? 0,
+        lab_tests: lab.count ?? 0,
+      });
+    } catch {
+      setViewMetrics({ consultations: 0, appointments: 0, prescriptions: 0, lab_tests: 0 });
+    }
+  };
+
+  /* ---------------- PROVISION LOGIN ---------------- */
   const provisionLogin = async (s: StaffMember) => {
     setProvisioningStaff(s);
     try {
-      // Fetch the caller's access token (the function needs it to verify admin).
       const { data: sessionData } = await supabase.auth.getSession();
       const accessToken = sessionData.session?.access_token;
       if (!accessToken) {
@@ -346,7 +527,6 @@ export default function StaffManagement() {
         body: JSON.stringify({ staffId: s.id }),
       });
 
-      // Read the body as text first so we can always debug, even on non-JSON.
       const raw = await res.text();
       let data: Record<string, unknown> = {};
       try {
@@ -359,19 +539,16 @@ export default function StaffManagement() {
         throw new Error((data.error as string) ?? `Request failed (${res.status})`);
       }
 
-      // The password may arrive as tempPassword or password (alias).
       const pwd = (data.tempPassword as string) ?? (data.password as string);
       const email = (data.email as string) ?? s.email;
 
       if (!pwd) {
-        // Shouldn't happen, but surface the real response if it does.
-        console.error("[Staff] no password in response:", data);
-        throw new Error("The function responded without a password. Check function logs.");
+        throw new Error("The function responded without a password.");
       }
 
       setCredentials({ email, password: pwd, name: s.name });
       setProvisioningStaff(null);
-      await load(); // refresh so auth_user_id badge updates
+      await load();
     } catch (e) {
       console.error("[Staff] provision error:", e);
       const message = e instanceof Error ? e.message : "Could not create login.";
@@ -444,11 +621,12 @@ export default function StaffManagement() {
       )}
 
       {/* STATS */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5">
         <StatCard label="Total Staff" value={stats.total} icon={Users} gradient="from-[#1E88E5] to-[#64B5F6]" delta="All personnel" />
         <StatCard label="On Duty" value={stats.onDuty} icon={CircleDot} gradient="from-[#2ECC71] to-[#58D68D]" delta="Available now" />
-        <StatCard label="Roles" value={stats.roles} icon={Layers} gradient="from-violet-500 to-purple-600" delta="Active types" />
-        <StatCard label="New This Month" value={stats.joinedThisMonth} icon={CalendarClock} gradient="from-[#F1C40F] to-[#F39C12]" delta="Joined" />
+        <StatCard label="On Leave" value={stats.onLeave} icon={CalendarClock} gradient="from-[#F1C40F] to-[#F39C12]" delta="Away today" />
+        <StatCard label="Suspended" value={stats.suspended} icon={ShieldBan} gradient="from-[#E74C3C] to-[#EC7063]" delta="Access blocked" />
+        <StatCard label="Pending Leave" value={stats.pendingLeave} icon={CalendarClock} gradient="from-violet-500 to-purple-600" delta="Awaiting approval" />
       </div>
 
       {/* CHARTS */}
@@ -526,121 +704,258 @@ export default function StaffManagement() {
         </motion.div>
       </div>
 
-      {/* TOOLBAR */}
-      <div className="rounded-3xl border border-slate-200/70 bg-white p-4 shadow-sm">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-center gap-2 rounded-xl bg-[#F4F6F8] px-3.5 py-2.5 lg:w-80">
-            <Search className="h-4 w-4 text-slate-400" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search name, ID, specialty..."
-              className="w-full bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400"
-            />
-            {search && (
-              <button onClick={() => setSearch("")} className="text-slate-400 hover:text-slate-600">
-                <X className="h-4 w-4" />
-              </button>
-            )}
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <FilterPills options={["All", ...ROLES]} value={roleFilter} onChange={(v) => setRoleFilter(v as Role | "All")} />
-            <span className="hidden h-5 w-px bg-slate-200 sm:block" />
-            <FilterPills options={["All", "On Duty", "Off Duty"]} value={dutyFilter} onChange={(v) => setDutyFilter(v as DutyStatus | "All")} />
-          </div>
-        </div>
-        <p className="mt-3 text-xs text-slate-400">Showing {filtered.length} of {staff.length} staff</p>
+      {/* TABS */}
+      <div className="flex flex-wrap gap-1 rounded-xl bg-[#F4F6F8] p-1">
+        {([["directory", "Directory", ListChecks], ["roster", "Shift Roster", CalendarDays], ["leave", "Leave Requests", CalendarClock]] as const).map(([key, label, Icon]) => (
+          <button key={key} onClick={() => setTab(key)} className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition ${tab === key ? "bg-white text-[#1E88E5] shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>
+            <Icon className="h-4 w-4" /> {label}
+          </button>
+        ))}
       </div>
 
-      {/* STAFF GRID */}
-      {loading ? (
-        <div className="flex h-64 items-center justify-center rounded-3xl border border-slate-200/70 bg-white">
-          <Loader2 className="h-8 w-8 animate-spin text-[#1E88E5]" />
-        </div>
-      ) : filtered.length === 0 ? (
-        <EmptyState icon={<Users className="h-8 w-8" />} title="No staff found" cta={{ label: "Add Staff", onClick: openAdd }} />
-      ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {filtered.map((s, i) => {
-            const meta = ROLE_META[s.role];
-            const Icon = meta.icon;
-            return (
-              <motion.div
-                key={s.id}
-                initial={{ opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.04 }}
-                whileHover={{ y: -5 }}
-                className="group relative overflow-hidden rounded-3xl border border-slate-200/70 bg-white p-5 shadow-sm transition hover:shadow-lg"
-              >
-                <div className={`absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r ${meta.gradient}`} />
-                <div className="mb-3 flex items-start justify-between">
-                  <div className={`relative flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br ${meta.gradient} text-xl font-bold text-white shadow-lg`}>
-                    {initials(s.name)}
-                    <span className="absolute -bottom-1 -right-1 h-4 w-4 rounded-full ring-2 ring-white" style={{ background: DUTY_META[s.status].dot }} />
-                  </div>
-                  <button
-                    onClick={() => toggleDuty(s)}
-                    className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset transition hover:opacity-80 ${DUTY_META[s.status].chip}`}
-                  >
-                    {s.status}
-                  </button>
-                </div>
-
-                <h3 className="text-base font-bold text-slate-900">{s.name}</h3>
-                <p className="text-xs text-slate-400">{s.id}</p>
-                <p className={`mt-1.5 flex items-center gap-1.5 text-sm font-medium ${meta.text}`}>
-                  <Icon className="h-3.5 w-3.5" />
-                  {s.specialization || meta.label}
-                </p>
-                <p className="mt-0.5 flex items-center gap-1.5 text-xs text-slate-500">
-                  <Building2 className="h-3.5 w-3.5" />
-                  {s.department || "—"}
-                </p>
-
-                {/* role + contact */}
-                <div className="mt-3 flex items-center gap-2">
-                  <span className={`inline-flex items-center gap-1 rounded-lg ${meta.soft} px-2 py-0.5 text-[11px] font-semibold ${meta.text}`}>
-                    {meta.label}
-                  </span>
-                </div>
-                <p className="mt-2 flex items-center gap-1.5 text-xs text-slate-500">
-                  <Phone className="h-3.5 w-3.5" /> {s.phone}
-                </p>
-
-                {/* login status indicator */}
-                {s.auth_user_id ? (
-                  <span className="mt-3 inline-flex items-center gap-1 rounded-lg bg-[#2ECC71]/10 px-2 py-1 text-[11px] font-semibold text-[#1E8C4A]">
-                    <CheckCircle2 className="h-3 w-3" /> Login enabled
-                  </span>
-                ) : (
-                  <button
-                    onClick={() => provisionLogin(s)}
-                    disabled={!!provisioningStaff}
-                    className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-[#2ECC71]/10 py-2 text-[11px] font-semibold text-[#1E8C4A] transition hover:bg-[#2ECC71]/20 disabled:opacity-60"
-                  >
-                    {provisioningStaff?.id === s.id ? (
-                      <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Creating...</>
-                    ) : (
-                      <><KeyRound className="h-3.5 w-3.5" /> Create Login</>
-                    )}
+      {/* ===================== DIRECTORY TAB ===================== */}
+      {tab === "directory" && (
+        <>
+          {/* TOOLBAR */}
+          <div className="rounded-3xl border border-slate-200/70 bg-white p-4 shadow-sm">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex items-center gap-2 rounded-xl bg-[#F4F6F8] px-3.5 py-2.5 lg:w-80">
+                <Search className="h-4 w-4 text-slate-400" />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search name, ID, specialty..."
+                  className="w-full bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400"
+                />
+                {search && (
+                  <button onClick={() => setSearch("")} className="text-slate-400 hover:text-slate-600">
+                    <X className="h-4 w-4" />
                   </button>
                 )}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <FilterPills options={["All", ...ROLES]} value={roleFilter} onChange={(v) => setRoleFilter(v as Role | "All")} />
+                <span className="hidden h-5 w-px bg-slate-200 sm:block" />
+                <FilterPills options={["All", "On Duty", "Off Duty"]} value={dutyFilter} onChange={(v) => setDutyFilter(v as DutyStatus | "All")} />
+              </div>
+            </div>
+            <p className="mt-3 text-xs text-slate-400">Showing {filtered.length} of {staff.length} staff</p>
+          </div>
 
-                <div className="mt-3 flex gap-2">
-                  <button onClick={() => setViewing(s)} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#1E88E5]/10 py-2 text-xs font-semibold text-[#1E88E5] transition hover:bg-[#1E88E5]/20">
-                    <Eye className="h-3.5 w-3.5" /> View
-                  </button>
-                  <button onClick={() => openEdit(s)} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#F1C40F]/15 py-2 text-xs font-semibold text-[#B8860B] transition hover:bg-[#F1C40F]/25">
-                    <Pencil className="h-3.5 w-3.5" /> Edit
-                  </button>
-                  <button onClick={() => setDeleting(s)} className="flex items-center justify-center gap-1.5 rounded-xl bg-[#E74C3C]/10 px-3 py-2 text-xs font-semibold text-[#C0392B] transition hover:bg-[#E74C3C]/20">
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+          {/* STAFF GRID */}
+          {loading ? (
+            <div className="flex h-64 items-center justify-center rounded-3xl border border-slate-200/70 bg-white">
+              <Loader2 className="h-8 w-8 animate-spin text-[#1E88E5]" />
+            </div>
+          ) : filtered.length === 0 ? (
+            <EmptyState icon={<Users className="h-8 w-8" />} title="No staff found" cta={{ label: "Add Staff", onClick: openAdd }} />
+          ) : (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {filtered.map((s, i) => {
+                const meta = ROLE_META[s.role];
+                const Icon = meta.icon;
+                const isSuspended = s.account_status === "Suspended";
+                const expDays = daysUntil(s.license_expiry);
+                const licenseExpiring = expDays !== null && expDays <= 30;
+
+                return (
+                  <motion.div
+                    key={s.id}
+                    initial={{ opacity: 0, y: 16 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: i * 0.04 }}
+                    whileHover={{ y: -5 }}
+                    className={`group relative overflow-hidden rounded-3xl border p-5 shadow-sm transition hover:shadow-lg ${isSuspended ? "border-[#E74C3C]/30 bg-[#E74C3C]/5" : "border-slate-200/70 bg-white"}`}
+                  >
+                    <div className={`absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r ${meta.gradient}`} />
+                    {isSuspended && (
+                      <div className="absolute right-3 top-3 rounded-full bg-[#E74C3C] px-2 py-0.5 text-[10px] font-bold text-white">SUSPENDED</div>
+                    )}
+                    <div className="mb-3 flex items-start justify-between">
+                      <div className={`relative flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br ${meta.gradient} text-xl font-bold text-white shadow-lg`}>
+                        {initials(s.name)}
+                        {!isSuspended && <span className="absolute -bottom-1 -right-1 h-4 w-4 rounded-full ring-2 ring-white" style={{ background: DUTY_META[s.status].dot }} />}
+                      </div>
+                      {!isSuspended && (
+                        <button
+                          onClick={() => toggleDuty(s)}
+                          className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset transition hover:opacity-80 ${DUTY_META[s.status].chip}`}
+                        >
+                          {s.status}
+                        </button>
+                      )}
+                    </div>
+
+                    <h3 className="text-base font-bold text-slate-900">{s.name}</h3>
+                    <p className="text-xs text-slate-400">{s.id}</p>
+                    <p className={`mt-1.5 flex items-center gap-1.5 text-sm font-medium ${meta.text}`}>
+                      <Icon className="h-3.5 w-3.5" />
+                      {s.specialization || meta.label}
+                    </p>
+                    <p className="mt-0.5 flex items-center gap-1.5 text-xs text-slate-500">
+                      <Building2 className="h-3.5 w-3.5" />
+                      {s.department || "—"}
+                    </p>
+
+                    {/* License alert */}
+                    {licenseExpiring && (
+                      <div className="mt-2 flex items-center gap-1.5 rounded-lg bg-[#E74C3C]/10 px-2 py-1 text-[10px] font-semibold text-[#C0392B]">
+                        <AlertTriangle className="h-3 w-3" /> License expires in {expDays}d!
+                      </div>
+                    )}
+
+                    {/* role + contact */}
+                    <div className="mt-3 flex items-center gap-2">
+                      <span className={`inline-flex items-center gap-1 rounded-lg ${meta.soft} px-2 py-0.5 text-[11px] font-semibold ${meta.text}`}>
+                        {meta.label}
+                      </span>
+                    </div>
+                    <p className="mt-2 flex items-center gap-1.5 text-xs text-slate-500">
+                      <Phone className="h-3.5 w-3.5" /> {s.phone}
+                    </p>
+
+                    {/* login status indicator */}
+                    {s.auth_user_id ? (
+                      <span className="mt-3 inline-flex items-center gap-1 rounded-lg bg-[#2ECC71]/10 px-2 py-1 text-[11px] font-semibold text-[#1E8C4A]">
+                        <CheckCircle2 className="h-3 w-3" /> Login enabled
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => provisionLogin(s)}
+                        disabled={!!provisioningStaff}
+                        className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-[#2ECC71]/10 py-2 text-[11px] font-semibold text-[#1E8C4A] transition hover:bg-[#2ECC71]/20 disabled:opacity-60"
+                      >
+                        {provisioningStaff?.id === s.id ? (
+                          <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Creating...</>
+                        ) : (
+                          <><KeyRound className="h-3.5 w-3.5" /> Create Login</>
+                        )}
+                      </button>
+                    )}
+
+                    <div className="mt-3 flex gap-2">
+                      <button onClick={() => openView(s)} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#1E88E5]/10 py-2 text-xs font-semibold text-[#1E88E5] transition hover:bg-[#1E88E5]/20">
+                        <Eye className="h-3.5 w-3.5" /> View
+                      </button>
+                      <button onClick={() => openEdit(s)} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#F1C40F]/15 py-2 text-xs font-semibold text-[#B8860B] transition hover:bg-[#F1C40F]/25">
+                        <Pencil className="h-3.5 w-3.5" /> Edit
+                      </button>
+                      <button onClick={() => toggleAccountStatus(s)} className={`flex items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition ${isSuspended ? "bg-[#2ECC71]/10 text-[#1E8C4A] hover:bg-[#2ECC71]/20" : "bg-[#E74C3C]/10 text-[#C0392B] hover:bg-[#E74C3C]/20"}`} title={isSuspended ? "Activate account" : "Suspend account"}>
+                        {isSuspended ? <ShieldOff className="h-3.5 w-3.5" /> : <ShieldBan className="h-3.5 w-3.5" />}
+                      </button>
+                      <button onClick={() => setDeleting(s)} className="flex items-center justify-center gap-1.5 rounded-xl bg-[#E74C3C]/10 px-3 py-2 text-xs font-semibold text-[#C0392B] transition hover:bg-[#E74C3C]/20">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ===================== ROSTER TAB ===================== */}
+      {tab === "roster" && (
+        <div className="rounded-3xl border border-slate-200/70 bg-white p-5 shadow-sm">
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <h3 className="flex items-center gap-2 text-base font-semibold text-slate-800">
+                <CalendarDays className="h-4 w-4 text-[#1E88E5]" /> Weekly Shift Roster
+              </h3>
+              <p className="text-sm text-slate-500">Click a cell to assign shift</p>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[800px] text-left text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 text-xs text-slate-400">
+                  <th className="px-3 py-2 font-medium">Staff Member</th>
+                  {DAYS.map((d) => <th key={d} className="px-3 py-2 text-center font-medium">{d.slice(0, 3)}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {staff.map((s) => (
+                  <tr key={s.id} className="border-b border-slate-100">
+                    <td className="px-3 py-3 font-semibold text-slate-700">{s.name}<br /><span className="text-[10px] font-normal text-slate-400">{s.role}</span></td>
+                    {DAYS.map((day) => {
+                      const shift = shifts.find((sh) => sh.staff_id === s.id && sh.day_of_week === day)?.shift_type || "Off";
+                      return (
+                        <td key={day} className="px-3 py-3 text-center">
+                          <select
+                            value={shift}
+                            onChange={(e) => updateShift(s.id, day, e.target.value)}
+                            className={`cursor-pointer rounded-lg border px-2 py-1 text-[11px] font-bold outline-none ${SHIFT_COLORS[shift]}`}
+                          >
+                            {SHIFT_TYPES.map((st) => <option key={st} value={st} className="bg-white text-slate-700">{st}</option>)}
+                          </select>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {/* Coverage gaps */}
+          <div className="mt-4 space-y-1.5">
+            {DAYS.map((day) => {
+              const dayShifts = shifts.filter((sh) => sh.day_of_week === day);
+              const types = ["Day", "Evening", "Night"];
+              const gaps = types.filter((t) => !dayShifts.some((sh) => sh.shift_type === t));
+              if (gaps.length === 0) return null;
+              return (
+                <div key={day} className="flex items-center gap-2 rounded-lg bg-[#F1C40F]/10 px-3 py-2 text-xs text-[#B8860B]">
+                  <AlertTriangle className="h-3.5 w-3.5" /> {day}: No staff on {gaps.join(", ")} shift
                 </div>
-              </motion.div>
-            );
-          })}
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ===================== LEAVE TAB ===================== */}
+      {tab === "leave" && (
+        <div className="rounded-3xl border border-slate-200/70 bg-white p-5 shadow-sm">
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="flex items-center gap-2 text-base font-semibold text-slate-800">
+              <CalendarClock className="h-4 w-4 text-[#1E88E5]" /> Leave Requests
+            </h3>
+            <button onClick={() => { setLeaveForm(emptyLeaveForm); setLeaveFormOpen(true); }} className="inline-flex items-center gap-2 rounded-xl bg-[#1E88E5] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#1976D2]">
+              <Plus className="h-4 w-4" /> Request Leave
+            </button>
+          </div>
+          <div className="space-y-3">
+            {leave.length === 0 ? (
+              <p className="py-8 text-center text-sm text-slate-400">No leave requests.</p>
+            ) : leave.map((l) => {
+              const sm = staff.find((s) => s.id === l.staff_id);
+              return (
+                <div key={l.id} className="flex flex-col gap-3 rounded-xl border border-slate-100 p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className={`flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br ${ROLE_META[sm?.role ?? "doctor"].gradient} text-xs font-bold text-white`}>
+                      {initials(sm?.name ?? "?")}
+                    </div>
+                    <div>
+                      <p className="font-semibold text-slate-800">{sm?.name ?? "Unknown"}</p>
+                      <p className="text-xs text-slate-500">{l.leave_type} · {fmtDate(l.start_date)} → {fmtDate(l.end_date)}</p>
+                      {l.reason && <p className="mt-1 text-xs text-slate-400">{l.reason}</p>}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {l.status === "Pending" ? (
+                      <>
+                        <button onClick={() => approveLeave(l.id, "Approved")} className="rounded-lg bg-[#2ECC71] px-4 py-2 text-xs font-bold text-white transition hover:bg-[#27AE60]">Approve</button>
+                        <button onClick={() => approveLeave(l.id, "Rejected")} className="rounded-lg bg-[#E74C3C] px-4 py-2 text-xs font-bold text-white transition hover:bg-[#C0392B]">Reject</button>
+                      </>
+                    ) : (
+                      <span className={`rounded-full px-3 py-1 text-xs font-bold ${l.status === "Approved" ? "bg-[#2ECC71]/10 text-[#1E8C4A]" : "bg-[#E74C3C]/10 text-[#C0392B]"}`}>{l.status}</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -659,6 +974,11 @@ export default function StaffManagement() {
                     <span className="h-1.5 w-1.5 rounded-full" style={{ background: DUTY_META[viewing.status].dot }} />
                     {viewing.status}
                   </span>
+                  {viewing.account_status === "Suspended" && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-[#E74C3C]/10 px-2.5 py-0.5 text-xs font-semibold text-[#C0392B] ring-1 ring-inset ring-[#E74C3C]/30">
+                      <ShieldBan className="h-3 w-3" /> Suspended
+                    </span>
+                  )}
                 </div>
                 <p className={`mt-1 flex items-center gap-1.5 text-sm font-medium ${ROLE_META[viewing.role].text}`}>
                   {(() => { const Icon = ROLE_META[viewing.role].icon; return <Icon className="h-4 w-4" />; })()}
@@ -668,16 +988,37 @@ export default function StaffManagement() {
               </div>
             </div>
 
+            {/* Performance Metrics */}
+            <div>
+              <h4 className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700">
+                <BarChart3 className="h-4 w-4 text-[#1E88E5]" /> Performance Metrics
+              </h4>
+              {viewMetrics ? (
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <MetricBox label="Consultations" value={viewMetrics.consultations} />
+                  <MetricBox label="Appointments" value={viewMetrics.appointments} />
+                  <MetricBox label="Prescriptions" value={viewMetrics.prescriptions} />
+                  <MetricBox label="Lab Orders" value={viewMetrics.lab_tests} />
+                </div>
+              ) : <Loader2 className="h-5 w-5 animate-spin text-[#1E88E5]" />}
+            </div>
+
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <InfoRow icon={IdCard} label="Staff ID" value={viewing.id} />
               <InfoRow icon={Layers} label="Role" value={ROLE_META[viewing.role].label} />
               <InfoRow icon={Mail} label="Email" value={viewing.email} />
               <InfoRow icon={Phone} label="Phone" value={viewing.phone} />
               <InfoRow icon={Building2} label="Department" value={viewing.department || "—"} />
+              <InfoRow icon={IdCard} label="License No." value={viewing.license_number || "N/A"} />
+              <InfoRow icon={CalendarClock} label="License Expiry" value={viewing.license_expiry ? fmtDate(viewing.license_expiry) : "N/A"} />
               <InfoRow icon={CalendarClock} label="Joined" value={fmtDate(viewing.created_at)} />
             </div>
 
             <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-4">
+              <button onClick={() => toggleAccountStatus(viewing)} className={`inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold transition ${viewing.account_status === "Suspended" ? "bg-[#2ECC71]/10 text-[#1E8C4A] hover:bg-[#2ECC71]/20" : "bg-[#E74C3C]/10 text-[#C0392B] hover:bg-[#E74C3C]/20"}`}>
+                {viewing.account_status === "Suspended" ? <ShieldOff className="h-4 w-4" /> : <ShieldBan className="h-4 w-4" />}
+                {viewing.account_status === "Suspended" ? "Activate" : "Suspend"}
+              </button>
               <button onClick={() => toggleDuty(viewing)} className="inline-flex items-center gap-2 rounded-xl bg-[#2ECC71]/10 px-5 py-2.5 text-sm font-semibold text-[#1E8C4A] transition hover:bg-[#2ECC71]/20">
                 <CircleDot className="h-4 w-4" /> Toggle {viewing.status === "On Duty" ? "Off" : "On"} Duty
               </button>
@@ -719,6 +1060,12 @@ export default function StaffManagement() {
                 ))}
               </select>
             </Field>
+            <Field label="License Number">
+              <input className={inputCls} value={form.license_number} onChange={(e) => setForm({ ...form, license_number: e.target.value })} placeholder="e.g. KMPDB-A-12345" />
+            </Field>
+            <Field label="License Expiry Date">
+              <input type="date" className={inputCls} value={form.license_expiry} onChange={(e) => setForm({ ...form, license_expiry: e.target.value })} />
+            </Field>
             <Field label="Specialization" className="sm:col-span-2">
               <input className={inputCls} value={form.specialization} onChange={(e) => setForm({ ...form, specialization: e.target.value })} placeholder="e.g. Cardiologist" />
             </Field>
@@ -744,6 +1091,34 @@ export default function StaffManagement() {
             <button disabled={saving} onClick={submit} className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#1E88E5] to-[#64B5F6] px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-[#1E88E5]/30 transition hover:from-[#1976D2] hover:to-[#42A5F5] disabled:opacity-60">
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : editing ? <CheckCircle2 className="h-4 w-4" /> : <UserPlus className="h-4 w-4" />}
               {editing ? "Save Changes" : "Add Staff"}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ---------------- LEAVE FORM MODAL ---------------- */}
+      <Modal open={leaveFormOpen} onClose={() => setLeaveFormOpen(false)} title="Request Leave" subtitle="Submit a new leave application" icon={<CalendarClock className="h-5 w-5" />}>
+        <div className="space-y-4">
+          <Field label="Staff Member" required>
+            <select className={inputCls} value={leaveForm.staff_id} onChange={(e) => setLeaveForm({ ...leaveForm, staff_id: e.target.value })}>
+              <option value="">Select staff...</option>
+              {staff.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.role})</option>)}
+            </select>
+          </Field>
+          <Field label="Leave Type" required>
+            <select className={inputCls} value={leaveForm.leave_type} onChange={(e) => setLeaveForm({ ...leaveForm, leave_type: e.target.value })}>
+              {LEAVE_TYPES.map((t) => <option key={t}>{t}</option>)}
+            </select>
+          </Field>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Start Date" required><input type="date" className={inputCls} value={leaveForm.start_date} onChange={(e) => setLeaveForm({ ...leaveForm, start_date: e.target.value })} /></Field>
+            <Field label="End Date" required><input type="date" className={inputCls} value={leaveForm.end_date} onChange={(e) => setLeaveForm({ ...leaveForm, end_date: e.target.value })} /></Field>
+          </div>
+          <Field label="Reason"><textarea className={`${inputCls} min-h-[60px] resize-y`} value={leaveForm.reason} onChange={(e) => setLeaveForm({ ...leaveForm, reason: e.target.value })} placeholder="Brief reason for leave..." /></Field>
+          <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+            <button onClick={() => setLeaveFormOpen(false)} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-100">Cancel</button>
+            <button disabled={saving} onClick={submitLeave} className="inline-flex items-center gap-2 rounded-xl bg-[#1E88E5] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#1976D2] disabled:opacity-60">
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarClock className="h-4 w-4" />} Submit
             </button>
           </div>
         </div>
@@ -892,6 +1267,15 @@ function StatCard({ label, value, icon: Icon, gradient, delta }: { label: string
         </div>
       </div>
     </motion.div>
+  );
+}
+
+function MetricBox({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-xl border border-slate-100 bg-[#F4F6F8] p-3 text-center">
+      <p className="text-xl font-bold text-slate-900">{value}</p>
+      <p className="text-[10px] uppercase tracking-wide text-slate-500">{label}</p>
+    </div>
   );
 }
 

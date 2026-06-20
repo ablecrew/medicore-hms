@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence, animate } from "framer-motion";
 import {
   PieChart,
@@ -164,6 +165,7 @@ const inputCls =
 
 export default function Patients() {
   const { profile } = useAuth();
+  const navigate = useNavigate();
 
   const [patients, setPatients] = useState<Patient[]>([]);
   const [loading, setLoading] = useState(true);
@@ -685,7 +687,8 @@ export default function Patients() {
                       initial={{ opacity: 0, y: 8 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: i * 0.02 }}
-                      className="border-b border-slate-50 transition hover:bg-[#F4F6F8]/60"
+                      onClick={() => navigate(`/patients/${p.id}`)}
+                      className="cursor-pointer border-b border-slate-50 transition hover:bg-[#F4F6F8]/60"
                     >
                       <td className="px-5 py-3">
                         <div className="flex items-center gap-3">
@@ -717,8 +720,8 @@ export default function Patients() {
                         <div className="flex items-center justify-end gap-1">
                           <IconButton
                             tone="blue"
-                            title="View"
-                            onClick={() => setViewing(p)}
+                            title="View EMR"
+                            onClick={() => navigate(`/patients/${p.id}`)}
                           >
                             <Eye className="h-4 w-4" />
                           </IconButton>
@@ -777,7 +780,7 @@ export default function Patients() {
                 </div>
                 <div className="mt-3 flex gap-2 border-t border-slate-100 pt-3">
                   <button
-                    onClick={() => setViewing(p)}
+                    onClick={() => navigate(`/patients/${p.id}`)}
                     className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-[#1E88E5]/10 py-2 text-xs font-semibold text-[#1E88E5]"
                   >
                     <Eye className="h-3.5 w-3.5" /> View

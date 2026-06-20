@@ -16,6 +16,7 @@ import Consultations from "@/pages/Consultations";
 import Addmissions from "../pages/Addmissions";
 import Notifications from "@/pages/Notifications";
 import Reports from "@/pages/Reports";
+import PatientDetail from "@/pages/PatientDetail";
 
 const appRoles = ["admin", "doctor", "lab", "pharmacy", "reception", "nurse"];
 
@@ -68,14 +69,22 @@ export default function AppRoutes() {
           }
         />
 
-        <Route
-          path="/patients"
-          element={
-            <ProtectedRoute allowedRoles={["admin", "doctor", "reception"]}>
-              <Patients />
-            </ProtectedRoute>
-          }
-        />
+      <Route
+        path="/patients"
+        element={
+          <ProtectedRoute allowedRoles={["admin", "doctor", "reception"]}>
+            <Patients />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/patients/:id"
+        element={
+          <ProtectedRoute allowedRoles={["admin", "doctor", "reception"]}>
+            <PatientDetail />
+          </ProtectedRoute>
+        }
+      />
 
         <Route
           path="/appointments"
